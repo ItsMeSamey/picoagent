@@ -14,6 +14,13 @@ experimental training project, **not a claim of general competence**.
 - Colab TPU integration and real container rollout verification in progress
 - No agentic benchmark score claimed and no benchmark training data included
 
+Accelerator policy: use GPU/TPU hours sparingly. Any separate accelerator smoke
+job is optional and must have a server-side timeout of at most **60 seconds**.
+Prepare dependencies and verified trajectories before allocating accelerators.
+Native GPT-6 Luna-authored candidates are preserved separately and are not
+training-eligible until their tool interactions have actually been executed and
+checked; no separate paid model API is required for candidate generation.
+
 The initial candidate is `HuggingFaceTB/SmolLM2-360M` at an exact revision.
 See [research](docs/research.md) for Granite 350M, Opt.Gear, smaller baselines,
 precision trade-offs, and the evidence-led experimental sequence. A pretrained

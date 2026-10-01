@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -40,10 +41,12 @@ class UnexecutedFixtureRegistry:
         command = shlex.split(json.loads(arguments)["command"])
         assert command[:2] == ["cat", "--"] and len(command) == 3
         self.read_count += 1
+        synthetic_id = hashlib.sha256(f"unexecuted-test-{self.read_count}".encode()).hexdigest()
         return {"stdout": self.files[command[2]], "stderr": "", "exit_code": 0,
                 "backend": "unexecuted_unit_fixture", "execution": "unexecuted",
-                "container_id": "unexecuted-unit-fixture-" + str(self.read_count),
-                "image": "unexecuted-unit-fixture-image",
+                "runtime": "unexecuted_fixture",
+                "container_id": "UNEXECUTED-CONTAINER-" + synthetic_id,
+                "image": "UNEXECUTED-sha256:" + hashlib.sha256(b"unexecuted-test-image").hexdigest(),
                 "timed_out": False, "truncated": False}
 
 
@@ -310,4 +313,4 @@ def test_pinned_tokenizer_4096_budget_with_unique_unexecuted_receipt_ids(family,
         if event["type"] == "assistant":
             assert pinned_smol_counter(event["input_messages"]) <= 4096 - 512
         else:
-            assert "unexecuted-unit-fixture-" not in event["summary_response"]["content"]
+            assert "UNEXECUTED-CONTAINER-" not in event["summary_response"]["content"]
