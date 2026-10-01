@@ -1,0 +1,19 @@
+{
+  "schema": "picoagent.clean_checkout_validation.v1",
+  "commit": "7cce336127545651235ab1b3e30e10645df57fd5",
+  "remote_main_verified": true,
+  "source": "git archive HEAD extracted to a fresh directory",
+  "command": "HF_HOME=<pinned-cache> PYTHONDONTWRITEBYTECODE=1 <locked-cpu-venv>/bin/python -m pytest -q",
+  "environment": "Existing locked CPU dependency environment; clean repository files, not a fresh dependency install",
+  "python": "3.12.14 (main, Aug 25 2026, 14:00:49) [Clang 22.1.3 ]",
+  "tests": {
+    "passed": 252,
+    "skipped": 19,
+    "subtests_passed": 40,
+    "seconds": 37.85
+  },
+  "accelerator_allocated": false,
+  "pretrained_training_performed": false,
+  "learned_model_performance": "not_measured",
+  "known_optional_skip": "Raw compaction pilot not distributed in this commit; its producer and controller contracts are included. Other opt-in/runtime skips remain explicit."
+}

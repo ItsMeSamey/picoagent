@@ -123,3 +123,5 @@ python -m pytest tests/test_checkpoint_sync.py tests/test_training_retention.py 
 ```
 
 Fake files/processes cover interrupted upload/download, restart reuse of verified chunks, checksum corruption, manifest path traversal, conflicting run identity, sealed resumable states, retained best/latest checkpoints, source-secret exclusions, and explicit session targeting. These tests do not contact Colab or validate actual storage durability.
+
+For bounded storage on the off-runtime controller, see [reviewed archive retention](checkpoint_workflow.md). Runtime-only pruning does not bound the controller archive.
