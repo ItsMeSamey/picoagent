@@ -34,6 +34,7 @@ class TrainingConfig:
     deterministic: bool = True
     smoke_test: bool = False
     allow_native_teacher_observed: bool = False
+    allow_artificial_action_plans: bool = False
     lora_rank: int = 16
     lora_alpha: int = 32
     lora_dropout: float = 0.0
@@ -42,7 +43,7 @@ class TrainingConfig:
         for key in ("model_id", "dataset_manifest", "output_dir"):
             if not isinstance(getattr(self, key), str) or not getattr(self, key).strip():
                 raise ValueError(f"{key} must be a nonempty string")
-        for key in ("gradient_checkpointing", "deterministic", "smoke_test", "allow_native_teacher_observed"):
+        for key in ("gradient_checkpointing", "deterministic", "smoke_test", "allow_native_teacher_observed", "allow_artificial_action_plans"):
             if not isinstance(getattr(self, key), bool):
                 raise ValueError(f"{key} must be a boolean")
         if self.device not in {"auto", "cpu", "cuda", "xla"}:
@@ -76,6 +77,8 @@ class TrainingConfig:
             value = getattr(self, key)
             if not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(value) or not 0 <= value < 1:
                 raise ValueError(f"{key} must be finite and in [0, 1)")
+        if self.allow_artificial_action_plans and not self.allow_native_teacher_observed:
+            raise ValueError("Artificial plans require the underlying native-evidence opt-in")
         if self.smoke_test and self.training_mode != "full":
             raise ValueError("CPU pipeline smoke tests use full mode only")
         if self.smoke_test and self.allow_native_teacher_observed:

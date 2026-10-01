@@ -1,0 +1,31 @@
+{
+  "eligible_untracked_directories": [
+    "data/artificial-reasoning-cli-v2",
+    "data/cli-compact-plan-view-v1",
+    "data/historical-working-evidence-v1",
+    "data/luna-knowledge-search-v1",
+    "data/luna-python-v1",
+    "data/native-combined-small-v1",
+    "data/native-compaction-216-v1",
+    "data/native-compaction-pilot-v1",
+    "data/native-compaction-v1",
+    "data/native-knowledge-search-160-v1",
+    "data/native-knowledge-search-pilot-v1",
+    "data/native-python-10k-v2",
+    "data/native-python-pilot-v3",
+    "data/native-recovery-pilot-v5",
+    "data/native-retention-16-v2",
+    "data/native-source-reviews",
+    "data/native-training-collection-v1",
+    "data/native-training-v1"
+  ],
+  "eligible_untracked_root_files": [
+    "data/historical-existing-ignore-audit-v1.json"
+  ],
+  "files_over_25MiB": [],
+  "future_or_other_owner_output_not_audited": [
+    "data/native-training-plans-v1"
+  ],
+  "no_stage_commit_or_push_performed": true,
+  "schema": "picoagent.local_data_staging_inventory.v1"
+}

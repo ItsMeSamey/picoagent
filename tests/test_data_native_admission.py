@@ -89,3 +89,124 @@ def test_actual_sealed_native_pilot_and_full_evidence_copy(tmp_path):
     target.write_bytes(target.read_bytes() + b" ")
     with pytest.raises(ValueError, match="integrity mismatch"):
         verify_dataset(copied, allow_native_teacher=True)
+
+
+@pytest.mark.parametrize(('directory', 'source'), [
+    ('native-python-pilot-v3', 'luna_python'),
+    ('native-compaction-pilot-v1', 'native_compaction'),
+    ('native-recovery-pilot-v5', 'luna_recovery'),
+])
+def test_reviewed_new_adapters_bind_actual_raw_bytes(directory, source):
+    import copy
+    from pathlib import Path
+    from picoagent.data.native_admission import extract_native_observation
+    from picoagent.data.native_storage import iter_rows
+    from picoagent.data.schema import _validate_model_event_replay
+    root = Path(__file__).resolve().parents[1] / 'data' / directory
+    if not (root / 'manifest.json').exists():
+        pytest.skip('optional actual native pilot is not distributed')
+    manifest = json.loads((root / 'manifest.json').read_text())
+    row = next(iter_rows(root / manifest['all_observations']['paths'][0]))
+    evidence = row['native_evidence']
+    projection = extract_native_observation(source, evidence['raw_record'], evidence['task'])
+    _validate_model_event_replay(projection)
+    validate_trace(row, allow_native_teacher=True)
+    forged = copy.deepcopy(evidence['raw_record'])
+    if source == 'luna_python':
+        forged['native_evidence']['receipts'][0]['stdout_bytes_b64'] = 'ZmFrZQ=='
+    elif source == 'native_compaction':
+        forged['receipts'][0]['stdout_b64'] = 'ZmFrZQ=='
+    else:
+        forged['receipts'][0]['stdin_b64'] = 'ZmFrZQ=='
+    with pytest.raises(DataValidationError, match='hash|mismatch|differs'):
+        extract_native_observation(source, forged, evidence['task'])
+
+
+def test_recovery_host_write_requires_exact_readback():
+    import copy
+    from pathlib import Path
+    from picoagent.data.native_storage import iter_rows
+    root = Path(__file__).resolve().parents[1] / 'data/native-recovery-pilot-v5'
+    if not (root / 'manifest.json').exists():
+        pytest.skip('optional actual recovery pilot is not distributed')
+    manifest = json.loads((root / 'manifest.json').read_text())
+    row = next(iter_rows(root / manifest['all_observations']['paths'][0]))
+    forged = copy.deepcopy(row)
+    receipt = next(v for v in forged['native_evidence']['receipts'] if v['name'] == 'write_file')
+    receipt['host_effect']['readback_verified'] = False
+    with pytest.raises(DataValidationError, match='readback'):
+        validate_trace(forged, allow_native_teacher=True)
+
+
+def test_native_combination_requires_opt_in_and_rejects_same_source(tmp_path):
+    from pathlib import Path
+    from picoagent.data.native_admission import combine_native_snapshots
+    source = Path(__file__).resolve().parents[1] / 'data/native-sharded-pilot-v1/manifest.json'
+    with pytest.raises(DataValidationError, match='explicit opt-in'):
+        combine_native_snapshots([source], tmp_path / 'not-created')
+    assert not (tmp_path / 'not-created').exists()
+    with pytest.raises(DataValidationError, match='repeated native sources'):
+        combine_native_snapshots([source, source], tmp_path / 'not-created', allow_native_teacher=True)
+    assert not (tmp_path / 'not-created').exists()
+
+
+def test_native_problem_origin_cannot_be_added_to_unreviewed_source():
+    import copy
+    from pathlib import Path
+    from picoagent.data.native_admission import native_problem_identity
+    from picoagent.data.native_storage import iter_rows
+    root = Path(__file__).resolve().parents[1] / 'data/native-sharded-pilot-v1'
+    manifest = json.loads((root / 'manifest.json').read_text())
+    row = next(iter_rows(root / manifest['all_observations']['paths'][0]))
+    assert native_problem_identity(row) == row['task_id']
+    forged = copy.deepcopy(row)
+    forged['provenance']['origin_base_task_id'] = 'unrelated-task'
+    with pytest.raises(DataValidationError, match='canonical problem identity'):
+        validate_trace(forged, allow_native_teacher=True)
+    forged = copy.deepcopy(row)
+    forged['provenance']['origin_base_task_sha256'] = '0' * 64
+    with pytest.raises(DataValidationError, match='origin task hash'):
+        validate_trace(forged, allow_native_teacher=True)
+
+
+def test_native_selection_deduplicates_views_without_hiding_cross_split_overlap():
+    from picoagent.data.native_admission import _select_native_success
+    problems, conversations = {}, {}
+    def row(task, split='train', text='same', origin=None):
+        return {'task_id': task, 'split': split, 'messages': [{'role': 'user', 'content': text}],
+                'provenance': {'origin_base_task_id': origin} if origin else {}}
+    assert _select_native_success(row('a'), problems, conversations, deduplicate=True)
+    assert not _select_native_success(row('b'), problems, conversations, deduplicate=True)
+    assert not _select_native_success(row('c', text='variant', origin='a'), problems, conversations, deduplicate=True)
+    assert _select_native_success(row('d', text='different'), problems, conversations, deduplicate=True)
+    with pytest.raises(DataValidationError, match='cross-split native conversation'):
+        _select_native_success(row('e', split='dev'), problems, conversations, deduplicate=True)
+    with pytest.raises(DataValidationError, match='cross-split native canonical'):
+        _select_native_success(row('f', split='dev', text='new', origin='a'), problems, conversations, deduplicate=True)
+
+
+def test_actual_knowledge_store_bytes_are_bound_to_state_and_have_no_process_claims():
+    import copy
+    from pathlib import Path
+    from picoagent.data.native_admission import extract_native_observation
+    from picoagent.data.native_storage import iter_rows
+    from picoagent.data.schema import content_hash
+    root = Path(__file__).resolve().parents[1] / 'data/native-knowledge-search-pilot-v1'
+    if not (root / 'manifest.json').exists():
+        pytest.skip('optional actual knowledge/search pilot is not distributed')
+    manifest = json.loads((root / 'manifest.json').read_text())
+    rows = list(iter_rows(root / manifest['all_observations']['paths'][0]))
+    row = next(r for r in rows if r['family'] == 'kv.note_write_verify')
+    validate_trace(row, allow_native_teacher=True)
+    raw = row['native_evidence']['raw_record']
+    assert raw['native_evidence']['initial_knowledge_file'] == {'exists': False}
+    forged = copy.deepcopy(raw)
+    forged['native_evidence']['initial_knowledge_file']['content_b64'] = ''
+    forged['raw_attempt_sha256'] = content_hash(forged['native_evidence'])
+    with pytest.raises(DataValidationError, match='missing native store'):
+        extract_native_observation('native_knowledge_search', forged, row['native_evidence']['task'])
+    forged = copy.deepcopy(raw)
+    forged['native_evidence']['receipts'][0]['argv'] = ['invented-process']
+    forged['raw_attempt_sha256'] = content_hash(forged['native_evidence'])
+    with pytest.raises(DataValidationError, match='cannot claim subprocess'):
+        extract_native_observation('native_knowledge_search', forged, row['native_evidence']['task'])

@@ -132,7 +132,7 @@ def _trace(task, candidate, raw, projection, review, references, tools, oracle):
                 "candidate_sha256": content_hash(candidate), "raw_projection": projection, "raw_projection_sha256": content_hash(projection),
                 "receipts": projection["receipts"], "artifacts": projection["artifacts"], "kv": projection["kv"],
                 "artifacts_sha256": content_hash(projection["artifacts"]), "kv_sha256": content_hash(projection["kv"]), "oracle_audit": audit}
-    return {"schema_version": task["schema_version"], "trace_id": f"native:{review['source_id']}:{content_hash(raw)}",
+    trace = {"schema_version": task["schema_version"], "trace_id": f"native:{review['source_id']}:{content_hash(raw)}",
             **{key: task[key] for key in ("task_id", "family", "template_id", "split")},
             "task_sha256": content_hash(task), "raw_attempt_sha256": content_hash(raw),
             "status": "success" if oracle["passed"] else "failed", "verification": verification,
@@ -142,6 +142,12 @@ def _trace(task, candidate, raw, projection, review, references, tools, oracle):
                            "accepted_compactions": sum(event.get("type") == "compaction" and event.get("accepted") is True for event in projection["model_events"]), "source_review_sha256": content_hash(review)},
             "tools": tools, "native_evidence": evidence,
             **{key: projection[key] for key in ("messages", "effective_messages", "model_events", "tool_events")}}
+    if task["task_id"] in review.get("origin_base_task_ids", {}):
+        trace["provenance"]["origin_base_task_id"] = review["origin_base_task_ids"][task["task_id"]]
+        trace["provenance"]["origin_base_task_sha256"] = review["origin_base_task_sha256"][task["task_id"]]
+    if "mode" in projection:
+        trace["provenance"]["context_mode"] = projection["mode"]
+    return trace
 
 
 def seal_sharded_snapshot(sources: list[dict], destination: str | Path, *, shard_bytes: int = DEFAULT_SHARD_BYTES) -> Path:
@@ -152,7 +158,9 @@ def seal_sharded_snapshot(sources: list[dict], destination: str | Path, *, shard
     all_writer = ShardWriter(root, "observations", limit=shard_bytes)
     selections = {split: ShardWriter(root, f"selection/{split}", limit=shard_bytes) for split in ("train", "dev")}
     observed, admitted, family_sets, template_sets = {}, {}, {"train": set(), "dev": set()}, {"train": set(), "dev": set()}
-    seen_tasks: set[str] = set()
+    seen_tasks: dict[str, str] = {}
+    seen_conversations: dict[str, str] = {}
+    mode_counts = {split: {mode: 0 for mode in ("full", "half", "manual")} for split in ("train", "dev")}
     try:
         for spec in sources:
             review = copy.deepcopy(spec["review"])
@@ -203,10 +211,9 @@ def seal_sharded_snapshot(sources: list[dict], destination: str | Path, *, shard
                     observed[source_id]["observed"] += 1
                     if not oracle["passed"]:
                         observed[source_id]["oracle_failed"] += 1
-                    elif identity in seen_tasks:
+                    elif not admission._select_native_success(trace, seen_tasks, seen_conversations, deduplicate=True):
                         observed[source_id]["duplicate_success"] += 1
                     else:
-                        seen_tasks.add(identity)
                         split = task["split"]
                         selections[split].add({"path": location, "row_index": index, "trace_sha256": content_hash(trace),
                                                "trace_id": trace["trace_id"], "task_id": identity, "split": split})
@@ -214,6 +221,8 @@ def seal_sharded_snapshot(sources: list[dict], destination: str | Path, *, shard
                         admitted[source_id][split] += 1
                         family_sets[split].add(task["family"])
                         template_sets[split].add(task["template_id"])
+                        if "mode" in projection:
+                            mode_counts[split][projection["mode"]] += 1
     finally:
         all_writer.close()
         for writer in selections.values():
@@ -224,11 +233,13 @@ def seal_sharded_snapshot(sources: list[dict], destination: str | Path, *, shard
     manifest = {"schema": admission.NATIVE_MANIFEST_SCHEMA, "storage": STORAGE, "admission": "audited_native_teacher_observed_only",
                 "lockbox_used": False, "teacher_mode": admission.TEACHER_MODE, "container_semantic_replay": "not_verified",
                 "arbitrary_learner_execution_allowed": False, "source_counts": {"observed": observed, "admitted": admitted},
+                "selected_compaction_modes": mode_counts,
+                "conversation_deduplication": "first_within_split",
                 "all_observations": {"paths": all_writer.paths, "records": all_writer.count},
                 "splits": {split: {"index_paths": writer.paths, "records": writer.count, "families": sorted(family_sets[split]),
                                    "templates": sorted(template_sets[split])} for split, writer in selections.items()},
                 "files": files, "max_file_bytes": MAX_FILE_BYTES, "logical_shard_limit": shard_bytes,
-                "selection": "first successful original variant per task in declared source order",
+                "selection": "first successful observed variant per reviewed canonical problem identity in declared source order",
                 "limitations": ["Native observed deterministic teacher replay, not adaptive model sampling or container parity.",
                                 "Training verification returns lightweight views only after checking the complete external evidence."]}
     write_new_json(root / "manifest.json", manifest)
@@ -276,7 +287,8 @@ def verify_sharded_snapshot(path: Path, manifest: dict) -> tuple[dict, dict[str,
         return json.loads((root / relative).read_text())
 
     records = {"train": [], "dev": []}
-    observed, admitted, seen, covered = {}, {}, set(), set()
+    observed, admitted, seen, covered = {}, {}, {}, set()
+    seen_conversations: dict[str, str] = {}
     total = 0
     for relative in manifest["all_observations"]["paths"]:
         admission._need(relative in files, "unhashed native observation shard")
@@ -303,6 +315,7 @@ def verify_sharded_snapshot(path: Path, manifest: dict) -> tuple[dict, dict[str,
             for name, digest in evidence["source_sha256"].items():
                 source_path = evidence["source_paths"][name]
                 admission._need(source_path in files and files[source_path]["sha256"] == digest, "native source code differs from reviewed snapshot")
+            admission.verify_native_context_tokens(row, root)
             oracle_name = next(name for name, digest in review["source_sha256"].items() if digest == review["oracle_source_sha256"])
             checked = admission._independent_oracle(source_id, evidence["task"], evidence["raw_projection"]["final"], evidence["artifacts"], evidence["kv"],
                                                    source_sha256=review["oracle_source_sha256"], source_path=root / evidence["source_paths"][oracle_name])
@@ -311,11 +324,10 @@ def verify_sharded_snapshot(path: Path, manifest: dict) -> tuple[dict, dict[str,
             if not checked["passed"]:
                 observed[source_id]["oracle_failed"] += 1
                 admission._need(location not in wanted, "failed native observation selected for SFT")
-            elif row["task_id"] in seen:
+            elif not admission._select_native_success(row, seen, seen_conversations, deduplicate=manifest.get("conversation_deduplication") == "first_within_split"):
                 observed[source_id]["duplicate_success"] += 1
                 admission._need(location not in wanted, "duplicate native task selected")
             else:
-                seen.add(row["task_id"])
                 selection = wanted.pop(location, None)
                 admission._need(selection is not None and selection["trace_sha256"] == content_hash(row) and selection["trace_id"] == row["trace_id"] and selection["task_id"] == row["task_id"] and selection["split"] == split, "native first-success selection mismatch")
                 observed[source_id]["admitted"] += 1
@@ -331,6 +343,8 @@ def verify_sharded_snapshot(path: Path, manifest: dict) -> tuple[dict, dict[str,
             expected_raw.update((relative, index) for index in range(info["records"]))
     admission._need(covered == expected_raw and not wanted and total == manifest["all_observations"]["records"], "native shard observation coverage mismatch")
     admission._need(manifest["source_counts"] == {"observed": observed, "admitted": admitted}, "native shard source counts mismatch")
+    if "selected_compaction_modes" in manifest:
+        admission._need(manifest["selected_compaction_modes"] == admission.selected_compaction_modes(records), "native selected mode counts mismatch")
     from picoagent.training.data import _check_disjoint
     _check_disjoint(records)
     for split, rows in records.items():

@@ -1,0 +1,77 @@
+"""Audit actual observed manual selections without rerunning commands."""
+from collections import Counter, defaultdict
+import base64
+import hashlib
+import json
+from pathlib import Path
+import sys
+from transformers import AutoTokenizer
+from picoagent.data.audit import file_hash,write_new_json
+from picoagent.data.native_storage import iter_rows
+from picoagent.data.native_compaction_curriculum import independent_oracle_check
+from picoagent.data.compaction_curriculum import visible_memory
+from picoagent.data.schema import _validate_model_event_replay,canonical_json,content_hash
+from picoagent.harness.protocol import END_MESSAGE,render_messages
+from picoagent.harness.tools import TOOL_SCHEMAS
+from picoagent.training.encoding import event_examples
+root=Path(sys.argv[1]).resolve()
+manifest=json.loads((root/'manifest.json').read_text())
+tok=AutoTokenizer.from_pretrained(str(root/'source_snapshot/tokenizer'),local_files_only=True,trust_remote_code=False)
+def count(rows,tools=TOOL_SCHEMAS,generation=True):
+ return len(tok.encode(render_messages(rows,tools,add_generation_prompt=generation),add_special_tokens=False))
+counts=Counter();split=defaultdict(Counter);indices=Counter();retained_sizes=[];requests=[];targets=[];examples=[];tasks=set()
+for name in manifest['observation_paths']:
+ assert file_hash(root/name)==manifest['observation_files'][name]['sha256']
+ for raw in iter_rows(root/name):
+  task=raw['task'];tasks.add(task['task_id'])
+  assert raw['source_id']=='native_compaction_retention' and raw['status']=='observed_success'
+  assert raw['teacher_model'] is None and raw['sft_admissible'] is False
+  assert task['split'] in ('train','dev') and task['family'].startswith('retention.')
+  _validate_model_event_replay(raw)
+  assert independent_oracle_check(task,raw['final'])['passed']
+  assert file_hash(root/raw['journal']['path'])==raw['journal']['file_sha256']
+  assert raw['fixture_sha256_before']==raw['fixture_sha256_after']
+  for receipt,event in zip(raw['receipts'],raw['tool_events']):
+   counts['actual_cat_receipts']+=1
+   assert receipt['result']==event['result']
+   path=json.loads(receipt['arguments'])['command'].removeprefix('cat -- ')
+   for stream in ('stdin','stdout','stderr'):
+    data=base64.b64decode(receipt[stream+'_b64'],validate=True)
+    assert len(data)==receipt[stream+'_bytes'] and hashlib.sha256(data).hexdigest()==receipt[stream+'_sha256']
+   assert base64.b64decode(receipt['stdout_b64'])==task['environment']['files'][path].encode()
+  task_nonempty=0
+  for event in raw['model_events']:
+   if event['type']!='compaction':continue
+   assert event['mode']=='manual' and event['accepted']
+   assert event['tokens_before']>event['trigger_budget']
+   assert count(event['before_messages'])==event['tokens_before']
+   assert count(event['result_messages'])==event['tokens_after']
+   groups=json.loads(event['summary_request'][1]['content'])['groups'];keep=event['keep_group_indices']
+   expected=[message for group in groups if group['id'] in keep for message in group['messages']]
+   assert canonical_json(expected)==canonical_json(event['retained_messages'])
+   assert visible_memory(event['before_messages'])==visible_memory(event['result_messages'])
+   assert len(keep)<len(groups)
+   key='nonempty' if keep else 'empty';counts[key]+=1;split[task['split']][key]+=1
+   indices[canonical_json(keep)]+=1
+   if keep:task_nonempty+=1
+   retained_sizes.append(count(event['result_messages'])-count(event['pinned_messages']+[event['summary_message']]))
+   requests.append(count(event['summary_request'],[]))
+   targets.append(len(tok.encode(canonical_json(event['summary_response'])+END_MESSAGE,add_special_tokens=False)))
+  assert task_nonempty>0
+  counts['tasks_with_nonempty_retention']+=1
+  for example,_ in event_examples({'trace_id':'native-retention-observed-awaiting-admission','tools':raw['tools'],'model_events':raw['model_events']}):
+   examples.append(count(example['messages'],example['tools'],False))
+assert len(tasks)==16 and counts['tasks_with_nonempty_retention']==16
+assert all(row['nonempty']>0 and row['empty']>0 for row in split.values())
+assert max(requests)<=3328 and max(targets)<=768 and max(examples)<=4096
+positive=[n for n in retained_sizes if n>0]
+report={'schema':'picoagent.native_compaction.manual_retention_integrity.v1','passed':True,
+        'source_manifest_sha256':file_hash(root/'manifest.json'),'verifier_sha256':file_hash(__file__),
+        'counts':dict(counts),'by_split':{k:dict(v) for k,v in split.items()},'unique_tasks':len(tasks),
+        'retained_group_id_sets':dict(indices),'retained_token_delta':{'min':min(retained_sizes),'max':max(retained_sizes),'nonempty_min':min(positive),'nonempty_max':max(positive)},
+        'max_summary_request_tokens':max(requests),'max_summary_target_tokens':max(targets),
+        'max_complete_sft_candidate_tokens':max(examples),'candidate_sft_events':len(examples),
+        'sft_admissible':False,'selection_scope':'Latest single contiguous complete tool group when it fits; not arbitrary retention competence',
+        'checks':['native_byte_receipts','frozen_fixture_oracle','exact_event_replay','genuine_token_trigger','discarded_groups_present','retained_atomic_groups_byte_identical','visible_memory_preserved','request_target_and_complete_example_fit']}
+write_new_json(root/'retention_integrity_report.json',report)
+print(canonical_json(report))

@@ -39,3 +39,17 @@ runs/**/checkpoints/
 /data/native-pilot-v2/
 /data/native-pilot-v3/
 /data/native-python-pilot-v1/
+
+# Frozen raw/superseded outputs: every file is byte-exactly represented by
+# data/historical-working-evidence-v1/files.jsonl and its pinned canonical
+# references/archives. Originals remain on disk; use new versioned paths for new runs.
+/data/luna-python-v1/native_teacher_observed.batch-v1/
+/data/luna-knowledge-search-v1/native_teacher_observed.batch-v1/
+/data/luna-knowledge-search-v1/native_teacher_observed.pilot-v1/
+/data/native-python-10k-v1/
+/data/native-compaction-v1/attempts/
+/data/native-compaction-v1/scale-216-v1/
+/data/native-compaction-v1/manual-retention-v2/attempts/
+/data/native-compaction-v1/manual-retention-contracts-v1/
+
+!data/native-source-reviews/pilot-token-audit-v1.json

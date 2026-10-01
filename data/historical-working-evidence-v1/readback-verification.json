@@ -1,0 +1,70 @@
+{
+  "all_source_inventory_hashes_equal_before_after": true,
+  "independently_reconstructed": [
+    {
+      "bytes": 1784,
+      "path": "data/luna-knowledge-search-v1/native_teacher_observed.batch-v1/tasks/manifest.json",
+      "sha256": "8245c5f5da4cc64899756d6d17d58441b8d4b1bdc991ac652c7c78ee71e35f50"
+    },
+    {
+      "bytes": 1780,
+      "path": "data/luna-knowledge-search-v1/native_teacher_observed.pilot-v1/tasks/manifest.json",
+      "sha256": "7ffd67f8ffc8b35493559674e30e24062407187a9c669e11a70e7e0d2225a5a9"
+    },
+    {
+      "bytes": 132430771,
+      "path": "data/luna-python-v1/native_teacher_observed.batch-v1/events.jsonl",
+      "sha256": "02da22af8669485c07747b3a25cf13ef354e719f771d716d955bad7bcf3a18a9"
+    },
+    {
+      "bytes": 204936939,
+      "path": "data/luna-python-v1/native_teacher_observed.batch-v1/records.jsonl",
+      "sha256": "625ce5e1d3026db739b8ba26304fdd72ae4eb854f5e3280126a2637018f87946"
+    },
+    {
+      "bytes": 3274,
+      "path": "data/native-compaction-v1/README.md",
+      "sha256": "5a2c4eaba09f7be9fedafbebb8fea2ca260bac3da4f7f445dda10540f0973ce2"
+    },
+    {
+      "bytes": 6602,
+      "path": "data/native-compaction-v1/audit_manual_retention.py",
+      "sha256": "210fbd15d8d34cee2709765a1b37a93ac19430a350d86aa77240f3839f07a8ee"
+    },
+    {
+      "bytes": 97228,
+      "path": "data/native-compaction-v1/manual-retention-contracts-v1/attempt-001.json",
+      "sha256": "5b7e93369a16b6a09810423b16f7ef4cf85e3cf0c53f48e4361d801058ed16b0"
+    },
+    {
+      "bytes": 4953,
+      "path": "data/native-compaction-v1/manual-retention-contracts-v1/source-attempt-001.py",
+      "sha256": "aedb8e24261510afb5ceaf56b501fe1884a7f465850516f661fc48151d6b9415"
+    },
+    {
+      "bytes": 4329,
+      "path": "data/native-compaction-v1/package_auxiliary.py",
+      "sha256": "44599c92f82034f4d50484a0cb644b80fa2068d4503e43c104e23fa4e258e44d"
+    },
+    {
+      "bytes": 6409,
+      "path": "data/native-compaction-v1/verify_scaled_observations.py",
+      "sha256": "eb7dc47d26c1635630f1b304ed47dd53b4d3bd4ad4bd03ef9f0cb345a8548f65"
+    },
+    {
+      "bytes": 882396,
+      "path": "data/native-python-10k-v1/selection/train/part-00000.jsonl.gz",
+      "sha256": "4fcc8e45deec2c8b549fd632d1fc72a9d345ee32bef42dc85358105ce1bb15bb"
+    }
+  ],
+  "inventory_sha256": "4f484d7513f433c0297c516a3110240c6142f3a0a7b22bf1e779f4fd683d74fb",
+  "new_archive_member_readback_verified": true,
+  "packager_snapshot_sha256": "94e0f161c53c6a330bfed79b215fa89b6d1703991f86536b76655abda9658f06",
+  "preservation_manifest_sha256": "eba70e72f24a6aee34c5b3d869c26d99b171a42af8d8c71d523cdca49febcdaa",
+  "prior_ignore_report": {
+    "path": "data/historical-existing-ignore-audit-v1.json",
+    "sha256": "f841cce0742b96e100e9574b01acc908d0f839aa0ac460c7c107598da1f10fbb"
+  },
+  "schema": "picoagent.historical_preservation.readback.v1",
+  "training_eligible": false
+}

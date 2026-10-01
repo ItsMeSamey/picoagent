@@ -1,0 +1,65 @@
+{
+  "cli": {
+    "aggregate_bytes": 103559325,
+    "aggregate_sha256": "90063f50363f7b7b522bc2818964d87f726e35eca7a62490ee985010a5d04d87",
+    "byte_exact_complete": true,
+    "canonical_manifest_sha256": "f27c4103a14bd9041211fab8685b20864a6bd100e7ffe96498e6228c139530db",
+    "source_bytes": 373941660,
+    "source_files": 40323,
+    "supplement": {
+      "bytes": 2412,
+      "path": "data/historical-working-evidence-v1/cli-late-audit-supplement.tar.gz",
+      "sha256": "624ff21d4d4ad7a8fa1edbbd1d62983c610ebc4c0cc5fb69f45148547fca7139"
+    },
+    "unrepresented_after_supplement": [],
+    "unrepresented_before_supplement": [
+      {
+        "bytes": 0,
+        "member": "annotation_packets/test.prefix_only_packets.jsonl",
+        "path": "data/luna-cli-v1/native_teacher_observed/batch_train_dev_10k_v1/annotation_packets/test.prefix_only_packets.jsonl",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "bytes": 3327,
+        "member": "token_audit_v1.json",
+        "path": "data/luna-cli-v1/native_teacher_observed/batch_train_dev_10k_v1/token_audit_v1.json",
+        "sha256": "359d8bb5c2e0d9bcd64520d2d78996a9683ec853a6b7141323bfcb886fd3cae0"
+      },
+      {
+        "bytes": 2442,
+        "member": "token_audit_v1_source.py",
+        "path": "data/luna-cli-v1/native_teacher_observed/batch_train_dev_10k_v1/token_audit_v1_source.py",
+        "sha256": "4eec3e1b005d97f7ca62ba1775754052329e0e37cc3d54d96cf6520886560afd"
+      }
+    ],
+    "verified_archives": 56
+  },
+  "historical_pilots": {
+    "data/native-pilot-v1": {
+      "archive": "data/historical-native-pilots/native-pilot-v1.tar.gz",
+      "archive_sha256": "21558c678e2f802bb18db9f3bed58af5e2eabc07051de7a42e7ee9b3a281aeac",
+      "byte_exact_verified": true,
+      "files": 31
+    },
+    "data/native-pilot-v2": {
+      "archive": "data/historical-native-pilots/native-pilot-v2.tar.gz",
+      "archive_sha256": "384e1af478d08a04a3d0a5516b10310d742383ac45fa903cb644a1719aa1fafe",
+      "byte_exact_verified": true,
+      "files": 37
+    },
+    "data/native-pilot-v3": {
+      "archive": "data/historical-native-pilots/native-pilot-v3.tar.gz",
+      "archive_sha256": "66229b6e9dc883481c795a90b7577ccef7ba30174f1d5282e85b119198977094",
+      "byte_exact_verified": true,
+      "files": 37
+    },
+    "data/native-python-pilot-v1": {
+      "archive": "data/historical-native-pilots/native-python-pilot-v1.tar.gz",
+      "archive_sha256": "49edf837673b61e1c77d132a6d752cd653aa64a8d3d1f2b18f87159fc68322e9",
+      "byte_exact_verified": true,
+      "files": 26
+    }
+  },
+  "schema": "picoagent.existing_ignore_preservation_audit.v1",
+  "training_eligible": false
+}

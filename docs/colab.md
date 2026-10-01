@@ -22,27 +22,33 @@ If no authorized session exists, stop here. The operator can inspect `colab new 
 
 ## Prepare an auditable code/data archive
 
-Use a clean reviewed checkout plus the admitted, immutable train/development snapshot under `data/`. Keep every raw attempt and trace, including failures. Keep sealed evaluation/lockbox data separate and never expose it to training. `stage` archives approved source/data roots with a SHA256 manifest, excludes `.git`, virtual environments, hidden credential directories and credential-like names, uploads the archive, then verifies it remotely. Symlinks are rejected. File-name filtering cannot detect a secret pasted into an ordinary source/config file: review before upload.
+Use a clean reviewed checkout plus the admitted, immutable train/development snapshot under `data/`. Keep every raw attempt and trace, including failures, on persistent storage. Keep sealed evaluation/lockbox data separate and never expose it to training. Prefer `--dataset-manifest` to archive code plus exactly one selected snapshot, without historical snapshots or raw working copies. Selection does not delete or change the originals. File-name filtering cannot detect a secret pasted into an ordinary source/config file: review before upload.
 
 ```sh
 python scripts/colab_run.py --session picoagent-tpu stage \
-  --archive /persistent/picoagent/source-v1.tar.gz
+  --archive /persistent/picoagent/source-v1.tar.gz \
+  --dataset-manifest data/selected-train-dev/manifest.json
 ```
 
-`stage` refuses to overwrite a nonempty project directory. This prevents accidentally mixing revisions. Select a fresh `--project /content/picoagent-v2` for another experiment. The archive includes code, configuration, docs, tests, dependency recipe/locks, and eligible `data/` files; it excludes run checkpoints and private account state. Preserve the archive on the controller and push the reviewed source to the authorized private GitHub repository separately. Do not put multi-GB model checkpoints into ordinary Git.
+Replace the illustrative manifest path with the actual reviewed dataset. It must reside under the source checkout's `data/` directory and contain a nonempty `files` map with SHA256 and byte lengths for **every self-contained dependency**, including nested snapshots. Required files are included even if git-ignored. Missing or changed files, path traversal, symlinks (including ancestors), and required files filtered as credential-like cause failure before upload. The existing public tokenizer/metadata filename exceptions remain allowed. A transport hash check does not replace the training CLI's dataset/provenance verification.
+
+For compatibility, omitting `--dataset-manifest` retains the previous archive scope: code, configuration, docs, tests, dependency recipes/locks and all eligible non-ignored `data/` files. This can be much larger and must not contain lockbox data. Both modes exclude private account state and run checkpoints. Keep the archive outside approved source/data roots; the persistent path above is recommended.
+
+Uploads now use content-addressed **32 MiB chunks** by default (`--chunk-bytes` can change this, up to 256 MiB). The CLI never receives the whole tarball. Local chunks remain beside the archive in `<archive>.chunks/`; remote chunks use `--transfer-root /content/picoagent-source-uploads`, under the archive hash. Each uploaded chunk is independently checked on the runtime. Repeat the identical command with the same frozen source after a disconnect: valid chunks, including complete uploads whose acknowledgment was lost, are reused. Corrupt/incomplete chunks are retried. Changed source produces a new archive identity.
+
+The runtime reconstructs and hashes the archive with bounded reads, extracts into a fresh temporary directory, verifies the exact file tree and hashes, then atomically publishes the project. Unsafe/duplicate tar entries and insufficient space fail closed. An exact completed retry is accepted after re-verification; an existing project with changed files or run outputs is never overwritten. Select a fresh `--project /content/picoagent-v2` for another experiment. Reserve space for local archive plus chunks, and remote chunks plus reconstructed archive plus extracted files; no automatic cleanup deletes originals or checkpoints. Preserve the archive on the controller and push the reviewed source to the authorized private GitHub repository separately. Diagnostics report exception types/locations without raw CLI output or credential-bearing exception text. Do not put multi-GB model checkpoints into ordinary Git.
 
 For TPU, preserve the runtime's matched `torch`/`torch_xla` pair and use `requirements-tpu.txt`. Never independently replace torch in a working TPU image. Use `requirements-cpu.lock.txt` only for the CPU reference environment. Record the exact actual environment in the run manifest. The same package identity is required for strict resume.
 
 ## Smoke, train and collect
 
+The user limits any optional accelerator smoke to **60 seconds total**, including compilation. Prefer skipping it after CPU plumbing qualification. The unbounded smoke CLI examples in generic development documentation must not be run on an accelerator without an external whole-process deadline. Production training is distinct from a smoke test; never disguise a long smoke as production.
+
 `start` launches one argv-only subprocess under a detached supervisor on the **selected** runtime, with a log at `/content/picoagent/controller-job.log` and status at `.picoagent-job.json`. A disconnected CLI does not itself cancel this subprocess, but Colab remains free to terminate the runtime. No shell expansion is used. An existing recorded running job prevents a duplicate launch; inspect its PID/log rather than launching a second copy. Kernel execution remains free for collection while training runs in the child process.
 
 ```sh
-# After dependency setup, first exercise the actual TPU backend.
-python scripts/colab_run.py --session picoagent-tpu start \
-  --command-json '["python","-m","picoagent.training","smoke","--device","xla","--output-dir","/content/picoagent-xla-smoke"]'
-
-# Only after the smoke succeeds and verified train/dev data is prepared:
+# Skip optional accelerator smoke by default. Complete CPU preflight first.
+# Start production only after verified train/dev data and durable transfer are ready:
 python scripts/colab_run.py --session picoagent-tpu start \
   --command-json '["python","-m","picoagent.training","train","--config","configs/smol360m_tpu.json"]'
 
@@ -53,9 +59,9 @@ python scripts/colab_run.py --session picoagent-tpu watch \
   --off-runtime --interval 60 --prune
 ```
 
-The `--off-runtime` flag is the operator's attestation of storage topology, not a discovery mechanism. Set `save_steps` before training and measure how long that interval and transfer take. The TPU preset saves every 25 optimizer steps; a 60-second watcher only finds **completed** checkpoints and cannot force earlier saves. Full 360M training stores FP32 parameters and Adam states: checkpoints are several GB, so bandwidth and staging space may dominate. Use a shorter save interval only after measuring sustainable transfer throughput.
+The `--off-runtime` flag is the operator's attestation of storage topology, not a discovery mechanism. Set `save_steps` before training and measure how long that interval and transfer take. The TPU preset saves every 10 optimizer steps; a 60-second watcher only finds **completed** checkpoints and cannot force earlier saves. Full 360M training stores FP32 parameters and Adam states: checkpoints are several GB, so bandwidth and staging space may dominate. Use a shorter save interval only after measuring sustainable transfer throughput.
 
-For T4 fallback, deliberately select the authorized T4 session name, run `smoke --device cuda`, then use a reviewed configuration with `device: "cuda"`, appropriate precision and save interval. This is a distinct run. Never silently re-label TPU training as T4 success or claim bitwise continuity across hardware.
+For T4 fallback, deliberately select the authorized T4 session name and use a reviewed configuration with `device: "cuda"`, appropriate precision and save interval. This is a distinct run. Never silently re-label TPU training as T4 success or claim bitwise continuity across hardware.
 
 `collect` performs one collection; `watch` repeats until the run reports completed/failed. Both exit visibly on a transfer/connection failure, leave resumable chunk state, and never allocate a replacement session. Restart the same command after checking the existing session. If a long command's response is lost, inspect the remote job status/log before retrying the launch: the job may have started even when the CLI reported an error. The controller's subprocess and Colab execution timeouts are explicit rather than the CLI's default 30 seconds. On interruption/timeout it terminates and reaps only its own local CLI process group, preventing abandoned reconnect threads from contending with a later command. CLI 0.7.4 can skip client cleanup when the initial connection fails; do not leave a traceback-producing CLI process running in another terminal.
 

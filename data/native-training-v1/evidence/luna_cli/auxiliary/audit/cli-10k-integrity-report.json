@@ -1,0 +1,36 @@
+{
+  "aggregate_sha256": "90063f50363f7b7b522bc2818964d87f726e35eca7a62490ee985010a5d04d87",
+  "attempt_index_sha256": "cad0f7751f31e1a2901e6e13819e843fb4b8aed13eeed6f5571a34d9112b032b",
+  "checks": [
+    "source_snapshots",
+    "index_hash_chain",
+    "per_attempt_journals",
+    "byte_exact_aggregate",
+    "whole_task_hashes",
+    "exact_action_plan",
+    "captured_stream_binding",
+    "model_context_replay",
+    "independent_fixture_oracles",
+    "no_test"
+  ],
+  "compressed_shards": [
+    "532493cfb1f8fa0b08727cbea3caed6f712b84cabf755dd354d8f6ee542f7ea4",
+    "ea100012f7ca690a2e1eb74b9f9b62e810a2207ee2a3db11fe073bda3e3a52ab",
+    "1d913338f66ec2918cae242172720f4b5813235de66cfdd4c938fac5c9b79531",
+    "97542d4514411ce0b525c1c0ab405b0941ac86eb28dfad0e872b46cea8718c1d",
+    "17e74fb3c10d8d780b9dd85c5b492b0e2c43877b0933b9098a8bb286e2712bf1",
+    "c9f97960ce1ca5b07d2f450e9aa711a2b71215975425ab2f6c3f1b73b79e26ca",
+    "bca375b63d86c5616eafdec25d7273dced7c3ae9190bde78b18edb4b1a850be7"
+  ],
+  "counts": {
+    "dev": 36,
+    "train": 10008
+  },
+  "native_commands_executed_by_validator": 0,
+  "passed": true,
+  "rows": 10044,
+  "seconds": 10.91,
+  "source": "luna_cli",
+  "source_snapshot_manifest_sha256": "ad2d590adc3d5851005a349f7c8132ea36a78332500c83f1c1733e222866f007",
+  "unique_tasks": 10044
+}

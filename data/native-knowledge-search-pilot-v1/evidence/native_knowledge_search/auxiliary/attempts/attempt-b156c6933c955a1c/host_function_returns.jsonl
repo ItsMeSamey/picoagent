@@ -1,0 +1,1 @@
+{"arguments":"{\"limit\":5,\"query\":\"missing code qzx4c895e313c\"}","duration_seconds":2.797900015139021e-05,"execution_kind":"host_function","name":"search","result":{"query":"missing code qzx4c895e313c","results":[],"source":"original_fixture_corpus","untrusted":true},"sequence":0,"tool_call_id":"ks_call_0001"}

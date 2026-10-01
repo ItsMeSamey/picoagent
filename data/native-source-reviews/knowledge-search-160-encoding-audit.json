@@ -1,0 +1,1 @@
+{"generated_commands_executed_by_validator":false,"manifest_sha256":"df2bd415d4ff1fcd4517f0deacea8679b671e333c782655a95bbd85aa6ffbd79","max_seq_length":4096,"maximum":1463,"no_truncation":true,"schema":"picoagent.native_knowledge_search.encoding_audit.v1","sft_examples":472,"supervised_tokens":31670,"tasks":160,"tokens":449423}

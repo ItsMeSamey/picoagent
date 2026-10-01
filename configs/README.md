@@ -142,3 +142,24 @@ Development loss determines the trainer's retained `best` checkpoint for recover
 Final agent qualification is separate: run the paired full/half/manual dev suite
 and compare the weakest mode's family-balanced task success first. Do not describe
 a loss-selected checkpoint as an agentic winner before actual tool evaluation.
+
+## Prepared native-curriculum production configurations
+
+`smol360m_native_t4.json` (CUDA FP16) and `smol360m_native_tpu.json`
+(XLA BF16) explicitly select `data/native-training-plans-v1/manifest.json`.
+This final snapshot must exist and pass validation before either is runnable.
+They opt into the reviewed native teacher evidence and separately pinned
+synthetic compact action-plan views. All parameters remain trainable.
+
+These production configurations save/evaluate every 100 optimizer steps or
+600 seconds at a completed step, whichever first requests a save. This reduces
+multi-GB checkpoint and evaluation overhead compared with the development
+presets. Configure off-runtime collection before starting, and measure whether
+transfers can keep up. An abrupt interruption can lose work since the last
+verified durable checkpoint; a long unfinished step cannot be saved midway.
+No accelerator smoke is required; an optional smoke has a 60-second total limit.
+
+One epoch is the initial frozen training schedule, not a promise of agent
+quality or a hardware-runtime estimate. Final qualification must report paired
+full/half/manual agent results separately, including failures. Training loss,
+reference-teacher success and unit tests are not substitutes for those scores.

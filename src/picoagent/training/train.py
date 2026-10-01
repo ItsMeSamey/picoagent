@@ -34,8 +34,12 @@ def run_training(config: TrainingConfig, *, resume_from_checkpoint: str | None =
     """
     if int(os.environ.get("WORLD_SIZE", "1")) != 1:
         raise ValueError("This audited baseline supports one process/device; distributed training requires a separately validated config")
+    initial_manifest_hash = sha256_file(config.dataset_manifest)
     manifest, rows = verify_dataset(config.dataset_manifest, allow_smoke=config.smoke_test,
-                                    allow_native_teacher=config.allow_native_teacher_observed)
+                                    allow_native_teacher=config.allow_native_teacher_observed,
+                                    allow_artificial_action_plans=config.allow_artificial_action_plans)
+    if sha256_file(config.dataset_manifest) != initial_manifest_hash:
+        raise ValueError("Dataset manifest changed during verification")
     if config.smoke_test != manifest.get("smoke_only", False):
         raise ValueError("smoke_test must exactly match the immutable dataset's smoke_only flag")
     output = Path(config.output_dir).resolve()
@@ -68,7 +72,7 @@ def run_training(config: TrainingConfig, *, resume_from_checkpoint: str | None =
     set_seed(config.seed)
     code = code_evidence()
     config_payload = config.as_dict()
-    manifest_hash = sha256_file(config.dataset_manifest)
+    manifest_hash = initial_manifest_hash
     environment = environment_evidence()
     hardware = {**device_metadata, "cuda_version": torch.version.cuda,
                 "cudnn_version": torch.backends.cudnn.version(), "torch_version": torch.__version__}
@@ -94,6 +98,13 @@ def run_training(config: TrainingConfig, *, resume_from_checkpoint: str | None =
             raise ValueError("Tokenizer requires an existing pad or EOS token; no silent vocabulary changes")
         tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = "right"
+    if manifest["schema"] == "picoagent.artificial_action_plan.dataset.v1":
+        from huggingface_hub import hf_hub_download
+        from picoagent.data.artificial_plans import validate_note_tokenizer
+        tokenizer_json = hf_hub_download(config.model_id, "tokenizer.json",
+                                         revision=config.model_revision, local_files_only=True, token=False)
+        validate_note_tokenizer(config.dataset_manifest, tokenizer, model_id=config.model_id,
+                                revision=config.model_revision, tokenizer_json_path=tokenizer_json)
     train_data, train_stats = encode_records(rows["train"], tokenizer, config.max_seq_length)
     dev_data, dev_stats = encode_records(rows["dev"], tokenizer, config.max_seq_length)
     load_args: dict[str, Any] = dict(common, dtype=torch.float32, attn_implementation="eager")
@@ -132,9 +143,16 @@ def run_training(config: TrainingConfig, *, resume_from_checkpoint: str | None =
         _snapshot_code(output, code)
         (output / "dataset_manifest.json").write_bytes(Path(config.dataset_manifest).read_bytes())
         dataset_snapshot = output / "dataset_snapshot"
-        if manifest["schema"] == "picoagent.native_teacher.dataset.v1":
-            from picoagent.data.native_admission import copy_native_snapshot
-            copied_manifest = copy_native_snapshot(config.dataset_manifest, dataset_snapshot)
+        if manifest["schema"] == "picoagent.artificial_action_plan.dataset.v1":
+            from picoagent.data.artificial_plans import _copy_verified_plan_snapshot
+            copied_manifest = _copy_verified_plan_snapshot(config.dataset_manifest, dataset_snapshot,
+                verified_manifest=manifest, expected_manifest_sha256=manifest_hash)
+            if sha256_file(copied_manifest) != manifest_hash:
+                raise ValueError("Artificial action-plan evidence changed while snapshotting")
+        elif manifest["schema"] == "picoagent.native_teacher.dataset.v1":
+            from picoagent.data.native_admission import _copy_verified_native_snapshot
+            copied_manifest = _copy_verified_native_snapshot(config.dataset_manifest, dataset_snapshot,
+                verified_manifest=manifest, expected_manifest_sha256=manifest_hash)
             if sha256_file(copied_manifest) != manifest_hash:
                 raise ValueError("Native evidence changed while creating run snapshot")
         else:

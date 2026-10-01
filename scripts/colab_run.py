@@ -7,7 +7,10 @@ Run this controller on a machine separate from the transient training runtime.
 from __future__ import annotations
 
 import argparse
+import gzip
+import hashlib
 import io
+import os
 import json
 import re
 import subprocess
@@ -17,10 +20,12 @@ import time
 from pathlib import Path
 
 from checkpoint_sync import CLITransfer, pack_checkpoint, pull_checkpoint, run_cli, sha256, upload_bundle
+from source_staging import (DEFAULT_CHUNK_BYTES, integrity_record, matches, no_symlink_path,
+                            pack_archive, relative_path)
 
 PROJECT = Path(__file__).resolve().parents[1]
 SOURCE_ROOTS = {"src", "scripts", "configs", "docs", "tests", "container", "data", ".github"}
-SOURCE_FILES = {"README.md", "LICENSE", "SECURITY.md", "pyproject.toml", "uv.lock", "requirements-cpu.lock.txt", "requirements-tpu.txt", ".gitignore", ".env.example"}
+SOURCE_FILES = {"README.md", "THIRD_PARTY_NOTICES.md", "LICENSE", "SECURITY.md", "pyproject.toml", "uv.lock", "requirements-cpu.lock.txt", "requirements-tpu.txt", ".gitignore", ".env.example"}
 EXCLUDED = {".git", ".venv", "venv", ".config", ".aws", ".ssh", ".codex", ".agents", ".colab-home", "__pycache__", ".pytest_cache", ".ruff_cache", "node_modules"}
 SECRET_NAME = re.compile(r"(^\.env($|\.)|credentials|oauth|(^|[-_])secrets?([_.-]|$)|(^|[-_])tokens?([_.-]|$)|\.pem$|\.key$)", re.I)
 PUBLIC_DATA_METADATA = {"tokenizer.json", "tokenizer_config.json", "special_tokens_map.json",
@@ -28,56 +33,143 @@ PUBLIC_DATA_METADATA = {"tokenizer.json", "tokenizer_config.json", "special_toke
 OUTPUT_SENTINEL = "PICOAGENT_RESULT="
 
 
-def archive_source(root: Path, output: Path) -> dict:
-    """Archive all approved code/data roots, with per-file hashes and no symlinks.
+def permitted_source(relative: Path) -> bool:
+    if any(part in EXCLUDED for part in relative.parts):
+        return False
+    if relative.parts[0] not in SOURCE_ROOTS and relative.as_posix() not in SOURCE_FILES:
+        return False
+    public_metadata = relative.parts[0] == "data" and relative.name in PUBLIC_DATA_METADATA
+    checked_parts = relative.parts[:-1] if public_metadata else relative.parts
+    return (relative.as_posix() == ".env.example"
+            or not any(SECRET_NAME.search(part) for part in checked_parts))
 
-    Denylisted names are a backstop, not secret detection. Review archive contents
-    before uploading; never place real secrets in source/config/data files.
+
+def selected_dataset_files(root: Path, manifest_path: Path) -> tuple[dict, dict]:
+    """Select a self-contained hash-listed snapshot, bypassing git-ignore only."""
+    manifest_path = no_symlink_path(manifest_path if manifest_path.is_absolute() else root / manifest_path)
+    if not manifest_path.is_relative_to(root) or manifest_path.relative_to(root).parts[0] != "data":
+        raise ValueError("Selected dataset manifest must be inside the source data directory")
+    if not permitted_source(manifest_path.relative_to(root)):
+        raise ValueError("Required dataset manifest would be removed by secret filtering")
+    if not manifest_path.is_file() or manifest_path.stat().st_size > 64 * 1024 * 1024:
+        raise ValueError("Selected dataset manifest is missing or exceeds bounds")
+    before = sha256(manifest_path)
+    manifest = json.loads(manifest_path.read_text())
+    listed = manifest.get("files")
+    if not isinstance(listed, dict) or not listed:
+        raise ValueError("Selected dataset requires a nonempty self-contained files hash map")
+    files = {}
+    for name, info in listed.items():
+        path = no_symlink_path(manifest_path.parent / relative_path(name))
+        relative = path.relative_to(root)
+        if not permitted_source(relative):
+            raise ValueError("Required dataset file would be removed by secret filtering")
+        integrity_record(info)
+        if not matches(path, info):
+            raise ValueError("Required dataset file is missing or failed integrity verification")
+        files[relative.as_posix()] = {"sha256": info["sha256"], "bytes": info["bytes"]}
+    if sha256(manifest_path) != before:
+        raise ValueError("Selected dataset manifest changed during verification")
+    name = manifest_path.relative_to(root).as_posix()
+    files[name] = {"sha256": before, "bytes": manifest_path.stat().st_size}
+    return files, {"path": name, "sha256": before}
+
+
+def archive_source(root: Path, output: Path, dataset_manifest: Path | None = None) -> dict:
+    """Archive code and either legacy eligible data or one explicit sealed snapshot.
+
+    Name filtering is a backstop, not content secret detection. Explicit dataset
+    files cannot silently disappear because of filters or git-ignore rules.
     """
-    root = root.resolve()
-    files = []
-    # Honor repository exclusions (for example raw working copies already
-    # preserved in byte-exact bounded archives), including untracked but
-    # non-ignored source/data. Non-git fixture/source directories still work.
+    root, output = no_symlink_path(root), no_symlink_path(output)
+    if output.is_relative_to(root) and permitted_source(output.relative_to(root)):
+        raise ValueError("Archive output must be outside approved source/data roots")
+    selected, selection = selected_dataset_files(root, dataset_manifest) if dataset_manifest is not None else ({}, None)
     inventory = subprocess.run(["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
                                cwd=root, capture_output=True, text=True)
     included = set(inventory.stdout.split("\0")) if inventory.returncode == 0 else None
-    for path in sorted(root.rglob("*")):
-        relative = path.relative_to(root)
-        if included is not None and relative.as_posix() not in included:
-            continue
-        if any(part in EXCLUDED for part in relative.parts):
-            continue
-        if relative.parts[0] not in SOURCE_ROOTS and relative.as_posix() not in SOURCE_FILES:
-            continue
-        public_metadata = relative.parts[0] == "data" and path.name in PUBLIC_DATA_METADATA
-        checked_parts = relative.parts[:-1] if public_metadata else relative.parts
-        if any(SECRET_NAME.search(part) for part in checked_parts) and relative.as_posix() != ".env.example":
-            continue
-        if path.is_symlink():
-            raise ValueError(f"Refusing source symlink: {relative}")
-        if path.is_file() and path.resolve() != output.resolve():
-            files.append(path)
-    manifest = {"schema": "picoagent.source-archive.v1", "files": {
-        path.relative_to(root).as_posix(): {"sha256": sha256(path), "bytes": path.stat().st_size}
-        for path in files}}
+    chunk_root = Path(str(output) + ".chunks")
+    files = dict(selected)
+    # Prune unselected data before walking it: historical raw working copies may
+    # contain millions of files and are not needed for a selected snapshot.
+    for directory, dirs, names in os.walk(root, followlinks=False):
+        parent = Path(directory)
+        dirs[:] = sorted(name for name in dirs if name not in EXCLUDED
+                         and not (parent == root and (name not in SOURCE_ROOTS or (selection and name == "data")))
+                         and parent / name != chunk_root)
+        for name in dirs:
+            path = parent / name
+            if path.is_symlink() and permitted_source(path.relative_to(root)):
+                raise ValueError("Refusing source symlink")
+        for name in sorted(names):
+            path = parent / name
+            relative = path.relative_to(root)
+            if (path == output or not permitted_source(relative)
+                    or (included is not None and relative.as_posix() not in included)):
+                continue
+            no_symlink_path(path)
+            if not path.is_file():
+                raise ValueError("Source entry is not a regular file")
+            files[relative.as_posix()] = {"sha256": sha256(path), "bytes": path.stat().st_size}
+    manifest = {"schema": "picoagent.source-archive.v1", "files": dict(sorted(files.items()))}
+    if selection:
+        manifest["selected_dataset"] = selection
     git = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, capture_output=True, text=True)
     manifest["git_commit"] = git.stdout.strip() if git.returncode == 0 else None
-    status = subprocess.run(["git", "status", "--porcelain=v1"], cwd=root, capture_output=True, text=True)
-    manifest["git_dirty"] = bool(status.stdout.strip()) if status.returncode == 0 else None
+    status_result = subprocess.run(["git", "status", "--porcelain=v1", "-z", "--untracked-files=all"],
+                                   cwd=root, capture_output=True, text=True)
+    # Exclude staging outputs from this informational flag, including on a retry
+    # of a clean checkout with --archive at its top level.
+    statuses = iter(status_result.stdout.split("\0"))
+    dirty = False
+    for entry in statuses:
+        if not entry:
+            continue
+        names = [entry[3:]]
+        if "R" in entry[:2] or "C" in entry[:2]:
+            names.append(next(statuses, ""))
+        for name in names:
+            candidate = root / name
+            if name and candidate != output and not candidate.is_relative_to(chunk_root):
+                dirty = True
+    manifest["git_dirty"] = dirty if status_result.returncode == 0 else None
     output.parent.mkdir(parents=True, exist_ok=True)
-    with tarfile.open(output, "w:gz") as archive:
-        for path in files:
-            name = path.relative_to(root).as_posix()
-            info = archive.gettarinfo(str(path), arcname=name)
-            info.uid = info.gid = info.mtime = 0
-            info.uname = info.gname = ""
-            with path.open("rb") as handle:
-                archive.addfile(info, handle)
-        payload = json.dumps(manifest, sort_keys=True, indent=2).encode() + b"\n"
-        info = tarfile.TarInfo("SOURCE_MANIFEST.json")
-        info.size = len(payload)
-        archive.addfile(info, io.BytesIO(payload))
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(dir=output.parent, prefix=".source-", delete=False) as raw:
+            temporary = Path(raw.name)
+            # Both gzip and tar timestamps are fixed so retries reuse the chunks.
+            with gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0) as compressed:
+                with tarfile.open(fileobj=compressed, mode="w|") as archive:
+                    for name, expected in manifest["files"].items():
+                        path = no_symlink_path(root / name)
+                        info = archive.gettarinfo(str(path), arcname=name)
+                        if not info.isfile() or info.size != expected["bytes"]:
+                            raise ValueError("Source changed while archiving")
+                        info.uid = info.gid = info.mtime = 0
+                        info.uname = info.gname = ""
+                        digest = hashlib.sha256()
+                        class HashReader:
+                            def __init__(self, stream):
+                                self.stream = stream
+                            def read(self, size):
+                                block = self.stream.read(size)
+                                digest.update(block)
+                                return block
+                        with path.open("rb") as handle:
+                            archive.addfile(info, HashReader(handle))
+                            if handle.read(1) or digest.hexdigest() != expected["sha256"]:
+                                raise ValueError("Source changed while archiving")
+                    payload = json.dumps(manifest, sort_keys=True, indent=2).encode() + b"\n"
+                    info = tarfile.TarInfo("SOURCE_MANIFEST.json")
+                    info.size = len(payload)
+                    archive.addfile(info, io.BytesIO(payload))
+            raw.flush()
+            os.fsync(raw.fileno())
+        os.replace(temporary, output)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
     return {"archive": str(output), "sha256": sha256(output), "manifest": manifest}
 
 
@@ -101,7 +193,7 @@ class Colab:
         for line in reversed(result.stdout.splitlines()):
             if line.startswith(OUTPUT_SENTINEL):
                 return json.loads(line[len(OUTPUT_SENTINEL):])
-        raise RuntimeError(f"Colab command did not return a result: {result.stdout[-1500:]} {result.stderr[-1500:]}")
+        raise RuntimeError("Colab command did not return a valid result; remote output suppressed")
 
     def transfer(self) -> CLITransfer:
         prefix = [self.executable, "download", "--session", self.session]
@@ -129,33 +221,48 @@ print({json.dumps(OUTPUT_SENTINEL)} + json.dumps(result))
 """)
 
 
-def stage(client: Colab, root: Path, project: str, archive_path: Path) -> dict:
-    result = archive_source(root, archive_path)
-    remote_archive = f"/content/picoagent-source-{result['sha256'][:16]}.tar.gz"
-    client.command("upload", str(archive_path), remote_archive.lstrip("/"))
-    return client.execute(f"""
-import hashlib, json, pathlib, tarfile
-archive_path = pathlib.Path({json.dumps(remote_archive)})
-target = pathlib.Path({json.dumps(project)})
-assert hashlib.sha256(archive_path.read_bytes()).hexdigest() == {json.dumps(result['sha256'])}, 'Archive hash mismatch'
-if target.exists() and any(target.iterdir()):
-    raise RuntimeError('Destination exists; choose a new project directory rather than overwrite a run')
-target.mkdir(parents=True, exist_ok=True)
-with tarfile.open(archive_path) as archive:
-    for member in archive:
-        relative = pathlib.PurePosixPath(member.name)
-        if relative.is_absolute() or '..' in relative.parts or not member.isfile():
-            raise ValueError('Unsafe archive entry')
-        path = target / str(relative)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with archive.extractfile(member) as source, path.open('xb') as destination:
-            import shutil
-            shutil.copyfileobj(source, destination)
-manifest = json.loads((target / 'SOURCE_MANIFEST.json').read_text())
-for relative, record in manifest['files'].items():
-    assert hashlib.sha256((target / relative).read_bytes()).hexdigest() == record['sha256'], relative
-print({json.dumps(OUTPUT_SENTINEL)} + json.dumps({{'project': str(target), 'source_files': len(manifest['files']), 'verified': True}}))
-""")
+def staging_call(client: Colab, operation: str, *args) -> dict:
+    if operation not in {"probe_chunks", "commit_chunk", "materialize_source"}:
+        raise ValueError("Unknown source staging operation")
+    helper = Path(__file__).with_name("source_staging.py").read_text()
+    code = helper + "\ntry:\n    result = " + operation + "(*" + repr(args) + ")\n"
+    code += "except Exception as error:\n    result = {'staging_error': type(error).__name__}\n"
+    code += "print(" + repr(OUTPUT_SENTINEL) + " + json.dumps(result))\n"
+    result = client.execute(code)
+    if "staging_error" in result:
+        raise RuntimeError("Remote source staging failed: " + result["staging_error"])
+    return result
+
+
+def stage(client: Colab, root: Path, project: str, archive_path: Path, *,
+          dataset_manifest: Path | None = None, chunk_bytes: int = DEFAULT_CHUNK_BYTES,
+          transfer_root: str = "/content/picoagent-source-uploads") -> dict:
+    result = archive_source(root, archive_path, dataset_manifest)
+    chunks, bundle = pack_archive(archive_path, result["manifest"], chunk_bytes)
+    remote_root = Path(transfer_root)
+    if not remote_root.is_absolute() or ".." in remote_root.parts:
+        raise ValueError("Source transfer root must be an absolute path")
+    remote = str(remote_root / bundle["archive"]["sha256"])
+    verified = set(staging_call(client, "probe_chunks", remote, bundle)["verified_chunks"])
+    uploaded = 0
+    for chunk in bundle["chunks"]:
+        digest = chunk["sha256"]
+        if digest in verified:
+            continue
+        local = chunks / digest
+        if not matches(local, chunk):
+            raise ValueError("Local source chunk failed verification")
+        # The CLI base64-loads just this bounded chunk, never the whole tarball.
+        client.command("upload", str(local), (remote + "/" + digest + ".partial").lstrip("/"), capture=True)
+        receipt = staging_call(client, "commit_chunk", remote, chunk)
+        if receipt.get("verified_chunk") != digest:
+            raise ValueError("Source upload acknowledgement mismatch")
+        verified.add(digest)
+        uploaded += 1
+    final = staging_call(client, "materialize_source", remote, project, bundle)
+    return {**final, "archive_sha256": result["sha256"], "uploaded_chunks": uploaded,
+            "unique_chunks": len(verified), "chunk_bytes": chunk_bytes,
+            "selected_dataset": result["manifest"].get("selected_dataset")}
 
 
 def start(client: Colab, project: str, command: list[str]) -> dict:
@@ -304,6 +411,9 @@ def main() -> None:
     staging = sub.add_parser("stage")
     staging.add_argument("--source", type=Path, default=PROJECT)
     staging.add_argument("--archive", type=Path, required=True)
+    staging.add_argument("--dataset-manifest", type=Path, help="Include only this self-contained snapshot under data/")
+    staging.add_argument("--chunk-bytes", type=int, default=DEFAULT_CHUNK_BYTES)
+    staging.add_argument("--transfer-root", default="/content/picoagent-source-uploads")
     launch = sub.add_parser("start")
     launch.add_argument("--command-json", required=True)
     recovery = sub.add_parser("restore")
@@ -326,7 +436,9 @@ def main() -> None:
     args = parser.parse_args()
     client = Colab(args.session, args.colab, args.timeout)
     if args.action == "stage":
-        result = stage(client, args.source, args.project, args.archive)
+        result = stage(client, args.source, args.project, args.archive,
+                       dataset_manifest=args.dataset_manifest, chunk_bytes=args.chunk_bytes,
+                       transfer_root=args.transfer_root)
     elif args.action == "start":
         result = start(client, args.project, json.loads(args.command_json))
     elif args.action == "status":
@@ -356,4 +468,9 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as error:
+        from colab_safe_cli import report_error
+        report_error("controller", error)
+        raise SystemExit(1) from None

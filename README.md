@@ -11,13 +11,13 @@ experimental training project, **not a claim of general competence**.
 - Original procedural curricula with held-out families and preserved provenance
 - Full-weight SFT and separately labeled optional QLoRA
 - CPU random-model smoke passed; pretrained model quality is not established
-- Colab TPU integration and real container rollout verification in progress
+- CUDA/TPU training and sandboxed learned-policy evaluation remain unvalidated
 - No agentic benchmark score claimed and no benchmark training data included
 
 Accelerator policy: use GPU/TPU hours sparingly. Any separate accelerator smoke
 job is optional and must have a server-side timeout of at most **60 seconds**.
 Prepare dependencies and verified trajectories before allocating accelerators.
-Native GPT-6 Luna-authored candidates are preserved separately and are not
+Assistant-authored candidates are preserved separately and are not
 training-eligible until their tool interactions have actually been executed and
 checked; no separate paid model API is required for candidate generation.
 
@@ -85,6 +85,28 @@ python -m picoagent.training train --config configs/smol360m_full.json
 Scripted-teacher completion rates are data-generator checks, **not model scores**.
 Search bootstrap tasks use an original, deterministic local document corpus,
 clearly distinguished from live SearXNG retrieval.
+
+## Reviewed native training collection
+
+`data/native-training-collection-v1/manifest.json` combines **20,326 training
+problems and 221 dev problems** with preserved actual tool receipts. These are
+seeded procedural variants, not that many distinct task families or independently
+sampled model trajectories. Teacher author-model identity is null where it was
+not exposed; the scalable execution is reviewed procedural replay.
+
+The collection includes CLI/Python work, a small recovery set, local document
+search and KV operations, and 216 canonical compaction problems. All three
+compaction modes have training/dev examples; manual data includes genuine
+nonempty keep selections as well as empty selections. The raw alternative mode
+runs remain archived without inflating canonical problem counts.
+
+The optional final view `data/native-training-plans-v1` adds reviewed compact
+artificial plans to 5,004 CLI training problems, replacing their normal views.
+Original traces and all dev examples stay preserved. See
+[artificial-plan admission](docs/artificial_action_plans.md),
+[native production configurations](configs/README.md), and
+[checkpoint transfer](docs/checkpoint_workflow.md). These are data and plumbing
+results, not evidence that a trained model succeeds on the tasks.
 
 ## Inference
 

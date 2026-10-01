@@ -104,7 +104,7 @@ Collect this track separately through the same runtime collector after reviewing
 
 ## Explicit native-teacher admission
 
-A separate reviewed category, `native_teacher_observed`, is available for genuinely observed CPU demonstrations produced by Luna-authored deterministic programs. This is **not** a sampled adaptive Luna rollout and does not claim a Docker/Podman receipt. The default learner runtime still fails closed without its configured container backend.
+A separate reviewed category, `native_teacher_observed`, is available for genuinely observed CPU demonstrations produced by reviewed deterministic procedural helpers. New seals record `teacher_model=null` and `teacher_decision_mode=reviewed_procedural_replay`; separately authored model candidates remain unexecuted unless their actual executed linkage is established. This is **not** a sampled adaptive model rollout and does not claim a Docker/Podman receipt. The default learner runtime still fails closed without its configured container backend.
 
 Native JSONL cannot enter generic training preparation. Production training must explicitly set `allow_native_teacher_observed=true` and consume a sealed `picoagent.native_teacher.dataset.v1` manifest through `verify_native_snapshot`. The ordinary `validate_trace` and training loaders reject native evidence by default. A caller-provided `approved=true` is insufficient: admission pins independently reviewed source-review hashes in the implementation.
 
@@ -115,3 +115,81 @@ The sealer retains original raw observations, original task and authored-program
 The first sealed CLI pilots are `data/native-pilot-v2/manifest.json` and the journal-before-validation revision `data/native-pilot-v3/manifest.json`, each with one train and one development task. These demonstrate admission plumbing only. `data/native-pilot-v1/` is a preserved incomplete sealing attempt without a manifest and is not admissible. The source recorders disclosed earlier transient checks whose raw outputs were not preserved; those are not included in complete-capture claims, and the touched holdout instance/family must be treated according to its exclusion record.
 
 Use `copy_native_snapshot(manifest_path, destination)` to copy a sealed dataset. It exclusively creates the destination, copies the entire hashed evidence tree, and re-verifies the result. Copying only train/dev JSONL is unsupported. Integrity hashes detect alteration; they are not cryptographic attestations proving remote execution against a malicious archive author.
+
+Training code that has just completed strict verification in the same process
+may use the private `_copy_verified_native_snapshot` helper with the returned
+manifest object and its expected byte SHA. This helper rechecks every source
+and destination byte/hash, including the manifest, without repeating completed
+semantic, oracle, or tokenizer audits. It is not a standalone admission route;
+the public copy and verification APIs retain their strict defaults.
+
+`picoagent.data.native_collection.seal_native_collection` creates a
+`sealed_native_collection_v1` storage envelope over disjoint already-sealed
+components. It strictly verifies each input, checks global selected-task,
+canonical-origin, normalized-conversation, family, and template disjointness,
+then copies component trees byte-for-byte. The outer manifest has a flat hash
+inventory and aggregated split/source/mode counts. No raw evidence is
+reserialized and no new observations are claimed. Standalone collection
+verification remains strict for every component.
+
+Use `combine_native_snapshots(manifest_paths, destination, allow_native_teacher=True)`
+to verify and reseal different source snapshots together. It preserves their
+complete original evidence, rejects repeated source identities/versions, and
+rechecks task, family, and template disjointness. A source extension uses a new
+explicitly reviewed source identity; it cannot overwrite the earlier source.
+If a reviewed derivation identifies a context variant of an existing problem,
+its new normalized provenance includes the hash-bound `origin_base_task_id` and
+original task hash without changing any raw task ID or context. First-success
+selection uses that canonical problem identity across sources. Put the reviewed
+retention source before the original compaction source to replace the matching
+training views; preserve every original variant. New manifests report selected
+full/half/manual counts by split, making any resulting imbalance visible.
+
+### Reviewed compaction and recovery observations
+
+The native compaction source keeps a shared `task_id`/`base_task_id` across full,
+half, and manual mode variants. Every variant stays in the raw evidence; the
+first successful variant in declared source order supplies training examples,
+so three modes do not triple the unique task count. The source orders preferred
+modes evenly within each split. Admission replays the entire event sequence and
+recomputes actual before/after/request token counts using the exact frozen public
+tokenizer. Full/manual source and retained groups, summary requests/responses,
+trigger budgets, and all raw subprocess outputs are preserved.
+
+The first 216-base full/half/manual batch contains 648 observed variants and
+10,152 accepted compactions. Its 3,456 manual decisions all select an empty
+`keep_groups` list. These valid examples cover summarization and empty-selection
+syntax; they do not demonstrate nonempty retention choices. The independently
+measured preferred variants supply 7,056 SFT examples, with a maximum of 3,346
+tokens at the frozen 4,096-token configuration.
+
+The separate reviewed retention extension records 16 mixed-length context
+variants of existing problem bases, including 80 nonempty keep/drop and 96 empty
+decisions. Derivation hashes bind the identical underlying goal/fact sequences;
+these add no independent problems. Its 448 per-decision examples fit 4,096
+tokens (maximum 3,445). Combining it first selects one training view per original
+problem, rather than counting both context variants as unique training tasks.
+
+New native seals also filter identical successful conversations within a split,
+using the same call-ID-normalized fingerprint as the unchanged training guard.
+Every filtered raw row remains in the snapshot and increments `duplicate_success`.
+Cross-split identity or conversation overlap is an error, never silently filtered.
+The Python 10,128-observation batch contains three duplicate train conversations,
+so its corrected selection has 9,997 train and 128 development records.
+
+The narrow recovery pilot admits two actually reviewed seed-zero families with
+real initial command failures, observation-driven repairs, and successful final
+artifact checks. Its file-write receipts include exact arguments and hashed
+readback. All stdin/stdout/stderr and post-artifact/KV bytes are checked. This
+pilot is not permission to collect arbitrary learner actions locally or approve
+unreviewed recovery families. Earlier incomplete pilots remain excluded; the
+original recorder's output truncation must be fixed in a new source version
+before broad recovery collection.
+
+The separate knowledge/search source uses real in-process `ToolRegistry`
+dispatch. Its 160-task collection contains 216 knowledge operations and 96
+retrievals over original task-owned fixture corpora. Every raw return is fsynced
+before post-state reads. Admission checks full KV file bytes, honest missing-file
+states, get/list/set/delete transitions, untouched outside keys, and immutable
+corpus retrieval. Host-function receipts do not invent process stdout/argv or
+container identity. The source is fixture search, not a live web-search run.

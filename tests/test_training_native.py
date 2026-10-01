@@ -56,3 +56,23 @@ def test_native_dispatch_still_rejects_test_split(tmp_path, monkeypatch):
         verify_native_snapshot=lambda *args, **kwargs: (manifest, {"train": [], "dev": [], "test": []})))
     with pytest.raises(ValueError, match="lockbox/test"):
         verify_dataset(path, allow_native_teacher=True)
+
+
+def test_artificial_plan_config_needs_both_boolean_opt_ins():
+    assert config().allow_artificial_action_plans is False
+    with pytest.raises(ValueError, match="native-evidence"):
+        config(allow_artificial_action_plans=True)
+    with pytest.raises(ValueError, match="boolean"):
+        config(allow_native_teacher_observed=True, allow_artificial_action_plans="yes")
+    assert config(allow_native_teacher_observed=True, allow_artificial_action_plans=True).allow_artificial_action_plans
+
+
+def test_artificial_manifest_requires_explicit_opt_ins(tmp_path):
+    path = tmp_path / "manifest.json"
+    path.write_text(json.dumps({"schema": "picoagent.artificial_action_plan.dataset.v1"}))
+    with pytest.raises(ValueError, match="explicit"):
+        verify_dataset(path)
+    with pytest.raises(ValueError, match="explicit"):
+        verify_dataset(path, allow_native_teacher=True)
+    with pytest.raises(ValueError, match="smoke"):
+        verify_dataset(path, allow_smoke=True, allow_native_teacher=True, allow_artificial_action_plans=True)

@@ -212,9 +212,21 @@ def prepare_dataset(train_path: str | Path, dev_path: str | Path, output_dir: st
 
 
 def verify_dataset(manifest_path: str | Path, *, allow_smoke: bool = False,
-                   allow_native_teacher: bool = False) -> tuple[dict[str, Any], dict[str, list[dict[str, Any]]]]:
+                   allow_native_teacher: bool = False,
+                   allow_artificial_action_plans: bool = False) -> tuple[dict[str, Any], dict[str, list[dict[str, Any]]]]:
     path = Path(manifest_path).resolve()
     manifest = json.loads(path.read_text(encoding="utf-8"))
+    if manifest.get("schema") == "picoagent.artificial_action_plan.dataset.v1":
+        if allow_smoke:
+            raise ValueError("Artificial action-plan data is not a pipeline smoke fixture")
+        from picoagent.data.artificial_plans import verify_plan_snapshot
+        plan_manifest, plan_records = verify_plan_snapshot(
+            path, allow_native_teacher=allow_native_teacher,
+            allow_artificial_action_plans=allow_artificial_action_plans)
+        if set(plan_records) != {"train", "dev"} or plan_manifest.get("lockbox_used") is not False:
+            raise ValueError("Artificial-plan data must contain only train/dev, never lockbox/test")
+        _check_disjoint(plan_records)
+        return plan_manifest, plan_records
     if manifest.get("schema") == "picoagent.native_teacher.dataset.v1":
         if not allow_native_teacher:
             raise ValueError("Native teacher data requires explicit allow_native_teacher_observed opt-in")

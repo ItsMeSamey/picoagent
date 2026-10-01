@@ -1,0 +1,127 @@
+{
+  "all_instantiated_notes_match_literal_template": true,
+  "authorship": {
+    "author_type": "native_assistant_synthetic_annotation",
+    "model": null,
+    "model_authored_templates_then_deterministic_reuse": true,
+    "model_status": "unknown_not_exposed_to_this_worker",
+    "per_packet_model_calls": 0,
+    "private_reasoning_used": false,
+    "template_count": 13
+  },
+  "builder_script": {
+    "path": "data/artificial-reasoning-cli-v2/build_cli_artificial_reasoning_v2.py",
+    "sha256": "1e2f350546f845a2cffde4e0caa7eced2bac3873fbb18d44ced747041ed2e4cd"
+  },
+  "coverage": {
+    "accepted_notes": 10842,
+    "accepted_plus_rejected_equals_input": true,
+    "input_packets": 10842,
+    "packets_with_notes_by_family": {
+      "cli.csv_average_price": 834,
+      "cli.csv_below_stock": 834,
+      "cli.csv_name_order": 834,
+      "cli.csv_revenue_total": 834,
+      "cli.json_group_totals": 834,
+      "cli.json_sorted_keys": 834,
+      "cli.json_unique_tags": 834,
+      "cli.log_level_counts": 834,
+      "cli.readonly_inventory": 834,
+      "cli.recover_missing_csv": 1668,
+      "cli.text_headings": 834,
+      "cli.text_word_counts": 834
+    },
+    "rejected_packets": 0,
+    "unique_tasks_with_notes": 10008
+  },
+  "do_not_read_or_include": [
+    "dev packets",
+    "test packets",
+    "future tool outputs",
+    "final answers",
+    "oracle values",
+    "real traces were not modified"
+  ],
+  "missing_template_action_positions": [],
+  "notes": {
+    "count": 10842,
+    "count_by_family": {
+      "cli.csv_average_price": 834,
+      "cli.csv_below_stock": 834,
+      "cli.csv_name_order": 834,
+      "cli.csv_revenue_total": 834,
+      "cli.json_group_totals": 834,
+      "cli.json_sorted_keys": 834,
+      "cli.json_unique_tags": 834,
+      "cli.log_level_counts": 834,
+      "cli.readonly_inventory": 834,
+      "cli.recover_missing_csv": 1668,
+      "cli.text_headings": 834,
+      "cli.text_word_counts": 834
+    },
+    "count_by_template": {
+      "cli.csv_average_price.action-0.compact.v2": 834,
+      "cli.csv_below_stock.action-0.compact.v2": 834,
+      "cli.csv_name_order.action-0.compact.v2": 834,
+      "cli.csv_revenue_total.action-0.compact.v2": 834,
+      "cli.json_group_totals.action-0.compact.v2": 834,
+      "cli.json_sorted_keys.action-0.compact.v2": 834,
+      "cli.json_unique_tags.action-0.compact.v2": 834,
+      "cli.log_level_counts.action-0.compact.v2": 834,
+      "cli.readonly_inventory.action-0.compact.v2": 834,
+      "cli.recover_missing_csv.action-0.compact.v2": 834,
+      "cli.recover_missing_csv.action-1.compact.v2": 834,
+      "cli.text_headings.action-0.compact.v2": 834,
+      "cli.text_word_counts.action-0.compact.v2": 834
+    },
+    "path": "train.notes.jsonl",
+    "sha256": "15fc709caa8b6dd9b8858b3d1db3f2fdcd56330cb6afc3b0cc3a971919ebb85c"
+  },
+  "rejected_matches": {
+    "count": 0,
+    "path": "rejected_matches.jsonl",
+    "reason_counts": {},
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "schema": "picoagent.cli_artificial_reasoning_manifest.v2",
+  "source_packet_count": 10842,
+  "source_packet_file": "data/luna-cli-v1/native_teacher_observed/batch_train_dev_10k_v1/annotation_packets/train.prefix_only_packets.jsonl",
+  "source_packet_file_sha256": "e387e5beae6423115779f884d71286a9ebf746400c6bf37840a7b1169da9ab7a",
+  "source_split_read": "train_only",
+  "status": "synthetic_template_reuse_pending_augmented_view_audit",
+  "templates": {
+    "count": 13,
+    "path": "templates.jsonl",
+    "sha256": "2c6b5fc5cb66f71a836f8b91503c90625ea337b779923584584c627278ce2f42",
+    "template_ids": [
+      "cli.csv_average_price.action-0.compact.v2",
+      "cli.csv_below_stock.action-0.compact.v2",
+      "cli.csv_name_order.action-0.compact.v2",
+      "cli.csv_revenue_total.action-0.compact.v2",
+      "cli.json_group_totals.action-0.compact.v2",
+      "cli.json_sorted_keys.action-0.compact.v2",
+      "cli.json_unique_tags.action-0.compact.v2",
+      "cli.log_level_counts.action-0.compact.v2",
+      "cli.readonly_inventory.action-0.compact.v2",
+      "cli.recover_missing_csv.action-0.compact.v2",
+      "cli.recover_missing_csv.action-1.compact.v2",
+      "cli.text_headings.action-0.compact.v2",
+      "cli.text_word_counts.action-0.compact.v2"
+    ]
+  },
+  "templates_without_observed_action_positions": [],
+  "tokenizer": {
+    "counting": "AutoTokenizer fast tokenizer; encode(note, add_special_tokens=False)",
+    "max_note_tokens": 24,
+    "measured_note_tokens_max": 18,
+    "measured_note_tokens_mean": 14.615384615384615,
+    "measured_note_tokens_min": 12,
+    "model": "HuggingFaceTB/SmolLM2-360M",
+    "revision": "f8027fd0eaeea54caa13c31d31b9fdc459c38b49",
+    "tokenizer_json_sha256": "9ca9acddb6525a194ec8ac7a87f24fbba7232a9a15ffa1af0c1224fcd888e47c"
+  },
+  "training_eligible": false,
+  "unique_action_positions": 13,
+  "unique_families": 12,
+  "unique_source_task_count": 10008
+}

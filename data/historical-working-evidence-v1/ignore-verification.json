@@ -1,0 +1,58 @@
+{
+  "excluded_paths": [
+    {
+      "bytes": 385065149,
+      "files": 50,
+      "path": "data/luna-python-v1/native_teacher_observed.batch-v1",
+      "verified_byte_exact": true
+    },
+    {
+      "bytes": 22922806,
+      "files": 1380,
+      "path": "data/luna-knowledge-search-v1/native_teacher_observed.batch-v1",
+      "verified_byte_exact": true
+    },
+    {
+      "bytes": 1817760,
+      "files": 120,
+      "path": "data/luna-knowledge-search-v1/native_teacher_observed.pilot-v1",
+      "verified_byte_exact": true
+    },
+    {
+      "bytes": 56360108,
+      "files": 83,
+      "path": "data/native-python-10k-v1",
+      "verified_byte_exact": true
+    },
+    {
+      "bytes": 52996329,
+      "files": 360,
+      "path": "data/native-compaction-v1/attempts",
+      "verified_byte_exact": true
+    },
+    {
+      "bytes": 732398075,
+      "files": 12402,
+      "path": "data/native-compaction-v1/scale-216-v1",
+      "verified_byte_exact": true
+    },
+    {
+      "bytes": 4156511,
+      "files": 304,
+      "path": "data/native-compaction-v1/manual-retention-v2/attempts",
+      "verified_byte_exact": true
+    },
+    {
+      "bytes": 102181,
+      "files": 2,
+      "path": "data/native-compaction-v1/manual-retention-contracts-v1",
+      "verified_byte_exact": true
+    }
+  ],
+  "git_index_modified": false,
+  "inventory_sha256": "4f484d7513f433c0297c516a3110240c6142f3a0a7b22bf1e779f4fd683d74fb",
+  "originals_deleted": false,
+  "preservation_manifest_sha256": "eba70e72f24a6aee34c5b3d869c26d99b171a42af8d8c71d523cdca49febcdaa",
+  "schema": "picoagent.verified_ignore.v1",
+  "training_eligible": false
+}
