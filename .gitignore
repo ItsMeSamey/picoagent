@@ -47,7 +47,28 @@ runs/**/checkpoints/
 /data/luna-knowledge-search-v1/native_teacher_observed.batch-v1/
 /data/luna-knowledge-search-v1/native_teacher_observed.pilot-v1/
 /data/native-python-10k-v1/
-/data/native-compaction-v1/attempts/
+# Keep bulk pilot evidence archived, but expose the 18 exact journals read
+# by the preserved-observation regression in a clean checkout.
+/data/native-compaction-v1/attempts/**
+!/data/native-compaction-v1/attempts/*/
+!/data/native-compaction-v1/attempts/09446ec9be1b30a51cb1/journal.jsonl
+!/data/native-compaction-v1/attempts/1276696ab0ba6ffba3ba/journal.jsonl
+!/data/native-compaction-v1/attempts/134ad5ebae0f62b28f5b/journal.jsonl
+!/data/native-compaction-v1/attempts/1495b499266a909f0527/journal.jsonl
+!/data/native-compaction-v1/attempts/17fec9a25ed354932517/journal.jsonl
+!/data/native-compaction-v1/attempts/2c5f545e98f153756090/journal.jsonl
+!/data/native-compaction-v1/attempts/2eabecf1c333d50ebdd9/journal.jsonl
+!/data/native-compaction-v1/attempts/5400e7d2a6c2d96b2bdc/journal.jsonl
+!/data/native-compaction-v1/attempts/5709464382c96c7107b4/journal.jsonl
+!/data/native-compaction-v1/attempts/6e0b93e1347ccb674450/journal.jsonl
+!/data/native-compaction-v1/attempts/7fa42424be9c291be11f/journal.jsonl
+!/data/native-compaction-v1/attempts/9a7718200a027607bfe8/journal.jsonl
+!/data/native-compaction-v1/attempts/bd014e5f97d61954bdf5/journal.jsonl
+!/data/native-compaction-v1/attempts/beee54e9a0b04ebe2916/journal.jsonl
+!/data/native-compaction-v1/attempts/c46f086d5e1ee44c9162/journal.jsonl
+!/data/native-compaction-v1/attempts/c4cdbc2e52c1819ae894/journal.jsonl
+!/data/native-compaction-v1/attempts/e1b6ca4e88e32e71a4dc/journal.jsonl
+!/data/native-compaction-v1/attempts/e3e8a2ed1d887d4b1c3d/journal.jsonl
 /data/native-compaction-v1/scale-216-v1/
 /data/native-compaction-v1/manual-retention-v2/attempts/
 /data/native-compaction-v1/manual-retention-contracts-v1/

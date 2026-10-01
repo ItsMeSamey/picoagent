@@ -1,0 +1,101 @@
+{
+  "files": [
+    {
+      "bytes": 378121,
+      "path": "data/native-compaction-v1/attempts/09446ec9be1b30a51cb1/journal.jsonl",
+      "sha256": "27666952a3d55adcfab3c8b0523965c61b7b2432259ca8abb30dfa34cff30e03"
+    },
+    {
+      "bytes": 420252,
+      "path": "data/native-compaction-v1/attempts/1276696ab0ba6ffba3ba/journal.jsonl",
+      "sha256": "edc63a6287edc74687ccf37eef0546deadc29c2a344e7e424ad01512b2d37a94"
+    },
+    {
+      "bytes": 386584,
+      "path": "data/native-compaction-v1/attempts/134ad5ebae0f62b28f5b/journal.jsonl",
+      "sha256": "dee229d34ea70b0a7a1b20bc6707b43bf807b3b3a8bb49e951a70216a256617b"
+    },
+    {
+      "bytes": 420857,
+      "path": "data/native-compaction-v1/attempts/1495b499266a909f0527/journal.jsonl",
+      "sha256": "8734ca84bf616f1ef9078394913d7b0aa4b180abb16d8b1ba6c3ebe17e234877"
+    },
+    {
+      "bytes": 420891,
+      "path": "data/native-compaction-v1/attempts/17fec9a25ed354932517/journal.jsonl",
+      "sha256": "257962c5025dadc4badbdd8206e651e0faa654238e81489495d754444e5619f6"
+    },
+    {
+      "bytes": 378193,
+      "path": "data/native-compaction-v1/attempts/2c5f545e98f153756090/journal.jsonl",
+      "sha256": "8da8fd841861583763cca43af3468296cbbc53d6e12f8d01c2a9b745aeafda90"
+    },
+    {
+      "bytes": 386521,
+      "path": "data/native-compaction-v1/attempts/2eabecf1c333d50ebdd9/journal.jsonl",
+      "sha256": "94daf244db43580a9271c57d6096114fc5300ce292b26bfe581ddffd7e6447c4"
+    },
+    {
+      "bytes": 386158,
+      "path": "data/native-compaction-v1/attempts/5400e7d2a6c2d96b2bdc/journal.jsonl",
+      "sha256": "7d1dadc18f39914d15871273e9fac5f5ad2c19d5775b586b359d0f62de707d1b"
+    },
+    {
+      "bytes": 386563,
+      "path": "data/native-compaction-v1/attempts/5709464382c96c7107b4/journal.jsonl",
+      "sha256": "a92a407bc40e28e26aef73747a842baaaa9a75cbdff29eb7327c319376b911d6"
+    },
+    {
+      "bytes": 385939,
+      "path": "data/native-compaction-v1/attempts/6e0b93e1347ccb674450/journal.jsonl",
+      "sha256": "b9bca63174570c02602872cb1885c3877ba52455e64ffa80aeb1b5dcdb9ae59d"
+    },
+    {
+      "bytes": 386589,
+      "path": "data/native-compaction-v1/attempts/7fa42424be9c291be11f/journal.jsonl",
+      "sha256": "187761a335633ee02e5d97349568acf13f9706876617125870c61f92bfa51ee5"
+    },
+    {
+      "bytes": 420932,
+      "path": "data/native-compaction-v1/attempts/9a7718200a027607bfe8/journal.jsonl",
+      "sha256": "bb1b3795800f964fa5c665e4f8bf60dbd81ec8fe2eda7d3e1c17c16c17c859ad"
+    },
+    {
+      "bytes": 378165,
+      "path": "data/native-compaction-v1/attempts/bd014e5f97d61954bdf5/journal.jsonl",
+      "sha256": "275e46fa87c1148a63b5a122526d4a179c21124af7648907a7e22d72d7d0a60c"
+    },
+    {
+      "bytes": 377531,
+      "path": "data/native-compaction-v1/attempts/beee54e9a0b04ebe2916/journal.jsonl",
+      "sha256": "40b4d667a44e8e23efa44dea066fc8c2a375df214ea2a052139b77aafd2a7420"
+    },
+    {
+      "bytes": 378184,
+      "path": "data/native-compaction-v1/attempts/c46f086d5e1ee44c9162/journal.jsonl",
+      "sha256": "4636b2c4bf7029cd09f6ff9560e248862e9a46de8e6bda72c5e8c845ad684071"
+    },
+    {
+      "bytes": 420481,
+      "path": "data/native-compaction-v1/attempts/c4cdbc2e52c1819ae894/journal.jsonl",
+      "sha256": "193de7af78ffb193d2b59303174c9302550a44df5599fccedbde89cae26b80cb"
+    },
+    {
+      "bytes": 377756,
+      "path": "data/native-compaction-v1/attempts/e1b6ca4e88e32e71a4dc/journal.jsonl",
+      "sha256": "b60d59192ef00034cda9a92651e29f696b4613c90af80f424f6bb89ee5cb57ac"
+    },
+    {
+      "bytes": 420931,
+      "path": "data/native-compaction-v1/attempts/e3e8a2ed1d887d4b1c3d/journal.jsonl",
+      "sha256": "f04e8b0c40c2fb7133d9446c192c7c853ed2231d0bb9dcdbf34705b82b3a4042"
+    }
+  ],
+  "git_index_modified": false,
+  "maximum_file_bytes": 420932,
+  "reason": "Exact original journal bytes are direct checkout dependencies of test_actual_pilot_retains_raw_native_receipts_and_exact_mode_events. Archive representations remain preserved.",
+  "schema": "picoagent.pilot_journal_checkout_access.v1",
+  "source_observations_sha256": "2b50dcdd507f5c748249563e9058f65e8c4c6e04b2ea6de8b8b113417f69c08c",
+  "total_bytes": 7110648,
+  "training_eligible": false
+}

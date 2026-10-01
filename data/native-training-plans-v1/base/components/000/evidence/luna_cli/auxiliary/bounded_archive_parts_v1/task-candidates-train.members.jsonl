@@ -1,0 +1,3 @@
+{"bytes":14986303,"path":"task_candidate_sidecars_v1/train.tasks.jsonl","sha256":"a4f26abe79a86fdbcc893e56f5dd7259ee103cf6b7457107ccaf3e56cc000d5e","source_relpath":"task_candidate_sidecars_v1/train.tasks.jsonl"}
+{"bytes":10793449,"path":"task_candidate_sidecars_v1/train.candidate_plans.jsonl","sha256":"ce5fef406d13931d62a129f7f7b769d508722f98d7fbb0a92c3b2eaa639b6711","source_relpath":"task_candidate_sidecars_v1/train.candidate_plans.jsonl"}
+{"bytes":2109,"path":"task_candidate_sidecars_v1/manifest.json","sha256":"9240c0ab758fc451d9e099a35633d5725bf79bb896b76097632614b66b3b30f4","source_relpath":"task_candidate_sidecars_v1/manifest.json"}

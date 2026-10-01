@@ -1,0 +1,13 @@
+{
+  "clean_archive_directory": "/workspace/scratch/443c242dcc32/picoagent-clean-journals-m5wyc0ak",
+  "imports_verified_from_clean_archive": true,
+  "overlay": "only modified .gitignore and the 18 exact original pilot journals",
+  "recorded_data_or_assertions_changed": false,
+  "returncode": 0,
+  "source_git_head": "410f5b5e17901b42189977b55c66e22cb18d3dfd",
+  "stdout": "...................                                                      [100%]\n19 passed in 7.84s\n",
+  "test_modules": [
+    "tests/test_native_compaction_curriculum.py",
+    "tests/test_manual_retention_curriculum.py"
+  ]
+}

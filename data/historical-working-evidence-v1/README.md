@@ -28,3 +28,7 @@ python scripts/preserve_data.py restore-file \
 The destination must not already exist. Canonical component directories listed in the preservation manifest must accompany this archive; they are not external storage dependencies. To inspect the CLI supplement, verify its hash against the existing-ignore audit and extract only the three listed regular members into a fresh directory.
 
 High-confidence private-key, AWS access-key and Hugging Face-token patterns were screened without printing matched content. Name/content checks cannot prove the absence of an arbitrary secret pasted into an ordinary file; these are reviewed synthetic curriculum artifacts, not a place to store credentials.
+
+## Clean-checkout pilot journal dependencies
+
+The 18 original pilot journals listed in `pilot-journal-accessibility.json` are also retained directly under `data/native-compaction-v1/attempts/<id>/journal.jsonl`. The preserved-observation regression hashes these paths. Their exact negated ignore rules expose only those journals; all other bulk attempt files remain archived. The journals total 7,110,648 bytes; consult the hashed inventory for the exact verified total. No recorded bytes or regression assertions were changed.
