@@ -1,0 +1,164 @@
+{
+  "encoded": {
+    "dev": {
+      "assistant_tokens": 225408,
+      "encoded_stream_sha256": "241a1ca9c75346615f15d92d42bb3d53faed79c0fbc6d7e49671f4d7471b8474",
+      "estimated_python_container_and_int_bytes": 108065556,
+      "event_expansion_seconds": 0.141743645988754,
+      "examples": 1203,
+      "fingerprint_seconds": 0.573156470010872,
+      "maximum_length": 3445,
+      "production_encode_seconds": 5.354419821916963,
+      "seconds": 6.426564253000834,
+      "tasks": 221,
+      "total_tokens": 2051093
+    },
+    "train": {
+      "assistant_tokens": 5921213,
+      "encoded_stream_sha256": "9259dedf88dbaafb0dd3dae5ff8768cf7d548881fa349a0eb2e342486fc7426d",
+      "estimated_python_container_and_int_bytes": 2740600712,
+      "event_expansion_seconds": 6.871116218939278,
+      "examples": 48702,
+      "fingerprint_seconds": 16.348779924286646,
+      "maximum_length": 3436,
+      "production_encode_seconds": 169.25752961767284,
+      "seconds": 203.5004531420018,
+      "tasks": 20326,
+      "total_tokens": 51878294
+    }
+  },
+  "head": "c2f82ade626f1fc6501885315c507572fbd25bb7",
+  "local_tokenizer_seconds": 0.19741622100264067,
+  "manifest_sha256": "e5774693bc42815ab44858754303b3970c7e34f26a1140425dccdd5853ccfbd9",
+  "peak_rss_mib": 1294.90625,
+  "profiler_sha256": "addf6de43d92e9fd414c97905bd12c0a1b3e75ac5e75743e62a8da418b03a8f0",
+  "profiling_caveats": [
+    "CPU-only local run; do not attribute remote delay without remote stage/process evidence.",
+    "Timed wrappers add minor overhead and page cache differs from Colab.",
+    "Encoding uses unchanged event_examples+encode_trace but discards each completed item; production encode_records currently retains them all.",
+    "No model download/load, GPU, provider or trace-command execution occurred.",
+    "Integer/container storage is an estimate; excludes retained trace rows, tokenizer, model and framework."
+  ],
+  "python": "3.12.14",
+  "schema": "picoagent.preparation.cpu_profile.v1",
+  "source_hashes": {
+    "picoagent.data.artificial_plans": "379533922eae9ebbef686bfbe0b7148190b422fe0458a2aec9ab8c75d215bf3f",
+    "picoagent.data.audit": "aa959b3922e2b2070f154411bf73723c6020cfb79ba7f3f93e28ed943764b0bf",
+    "picoagent.data.native_admission": "f988afb807887109275e106b9b0da9f3fd407c69ebb45e60a451918960bd3325",
+    "picoagent.data.native_collection": "c28532470a56783f3c992ecd85572d0aa0fd60d4e2b8b60a4ee6aa228762727b",
+    "picoagent.data.native_storage": "2a801c7fbaf69f528288a27f35e0a8d2e32dda0b2802f6aed3cd7c02fc5bef92",
+    "picoagent.data.schema": "ea740b1f984cd8c353e64d56e0f0c5f990a83a771e52e4562b6eda0ecfe45970",
+    "picoagent.training.data": "292a021eacc7668591f95729100f9fe80a9cfef8ca21401646a43d453454e869",
+    "picoagent.training.encoding": "4a1a147335b689c025286d053434c7147f61244e0920569cf1cb85ba59255cb7"
+  },
+  "streaming_production_encoding_wall_seconds": 209.9277023629984,
+  "strict_verify_seconds": 487.49644635799996,
+  "timers": {
+    "picoagent.data.artificial_plans._apply": {
+      "calls": 1,
+      "exclusive_seconds": 7.607720590000099,
+      "inclusive_seconds": 7.607720590000099
+    },
+    "picoagent.data.artificial_plans.verify_plan_snapshot": {
+      "calls": 1,
+      "exclusive_seconds": 1.8854436290057492,
+      "inclusive_seconds": 486.4433777030026
+    },
+    "picoagent.data.audit.file_hash": {
+      "calls": 2779,
+      "exclusive_seconds": 7.891868817016075,
+      "inclusive_seconds": 7.891868817016075
+    },
+    "picoagent.data.native_admission._independent_oracle": {
+      "calls": 20998,
+      "exclusive_seconds": 3.0058575272960297,
+      "inclusive_seconds": 3.2640612603063346
+    },
+    "picoagent.data.native_admission.extract_native_observation": {
+      "calls": 20998,
+      "exclusive_seconds": 19.230995457270183,
+      "inclusive_seconds": 19.230995457270183
+    },
+    "picoagent.data.native_admission.validate_native_evidence": {
+      "calls": 20998,
+      "exclusive_seconds": 37.68606284163252,
+      "inclusive_seconds": 56.9170582989027
+    },
+    "picoagent.data.native_admission.verify_native_context_tokens": {
+      "calls": 20998,
+      "exclusive_seconds": 247.5476118887491,
+      "inclusive_seconds": 247.5476118887491
+    },
+    "picoagent.data.native_admission.verify_native_context_tokens:luna_cli": {
+      "calls": 10044,
+      "exclusive_seconds": 0.0202163419489807,
+      "inclusive_seconds": 0.0202163419489807
+    },
+    "picoagent.data.native_admission.verify_native_context_tokens:luna_python": {
+      "calls": 10128,
+      "exclusive_seconds": 0.023756228812999325,
+      "inclusive_seconds": 0.023756228812999325
+    },
+    "picoagent.data.native_admission.verify_native_context_tokens:luna_recovery": {
+      "calls": 2,
+      "exclusive_seconds": 3.735000063898042e-06,
+      "inclusive_seconds": 3.735000063898042e-06
+    },
+    "picoagent.data.native_admission.verify_native_context_tokens:native_compaction": {
+      "calls": 648,
+      "exclusive_seconds": 234.74646027498238,
+      "inclusive_seconds": 234.74646027498238
+    },
+    "picoagent.data.native_admission.verify_native_context_tokens:native_compaction_retention": {
+      "calls": 16,
+      "exclusive_seconds": 12.756839957004559,
+      "inclusive_seconds": 12.756839957004559
+    },
+    "picoagent.data.native_admission.verify_native_context_tokens:native_knowledge_search": {
+      "calls": 160,
+      "exclusive_seconds": 0.000335351000103401,
+      "inclusive_seconds": 0.000335351000103401
+    },
+    "picoagent.data.native_admission.verify_native_snapshot": {
+      "calls": 3,
+      "exclusive_seconds": 0.0035606130004453007,
+      "inclusive_seconds": 941.5945971600013
+    },
+    "picoagent.data.native_collection.verify_native_collection": {
+      "calls": 1,
+      "exclusive_seconds": 0.7020793219890038,
+      "inclusive_seconds": 472.4033155010002
+    },
+    "picoagent.data.native_storage.metadata": {
+      "calls": 522,
+      "exclusive_seconds": 63.704605699942476,
+      "inclusive_seconds": 64.74824185594844
+    },
+    "picoagent.data.native_storage.verify_sharded_snapshot": {
+      "calls": 2,
+      "exclusive_seconds": 89.46568727471094,
+      "inclusive_seconds": 469.18772104600066
+    },
+    "picoagent.data.schema._validate_model_event_replay": {
+      "calls": 20998,
+      "exclusive_seconds": 0.936938108105096,
+      "inclusive_seconds": 0.936938108105096
+    },
+    "picoagent.data.schema.validate_trace": {
+      "calls": 20998,
+      "exclusive_seconds": 3.081931826287473,
+      "inclusive_seconds": 60.93592823329527
+    },
+    "picoagent.training.data._check_disjoint": {
+      "calls": 4,
+      "exclusive_seconds": 4.751281132001168,
+      "inclusive_seconds": 4.751281132001168
+    },
+    "picoagent.training.data.verify_dataset": {
+      "calls": 1,
+      "exclusive_seconds": 0.0025067860005947296,
+      "inclusive_seconds": 487.49641832400084
+    }
+  },
+  "total_elapsed_seconds": 697.6308309380001
+}

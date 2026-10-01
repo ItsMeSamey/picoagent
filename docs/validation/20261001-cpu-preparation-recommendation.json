@@ -1,0 +1,49 @@
+{
+  "checkpoint_evaluation": {
+    "estimated_dev_evaluation_seconds": 601.5,
+    "estimated_time_before_durable_save_excluding_serialization_seconds": 1201.5,
+    "future_policy": "Decouple durability save/export from evaluation. Seal checkpoint first at a completed optimizer step, then evaluate exact immutable checkpoint on a separately frozen cadence. Preserve RNG/state and uninterrupted/resumed equivalence; do not mutate active run.",
+    "nominal_timer_seconds": 600,
+    "parent_reported_dev_examples": 1203,
+    "parent_reported_dev_examples_per_second": 2,
+    "quality_caveat": "Dev loss is not an agent success or benchmark score.",
+    "source_confirmed": "train.py timer sets both should_save and should_evaluate; installed Trainer._maybe_log_save_evaluate evaluates before _save_checkpoint/on_save seal"
+  },
+  "data_manifest_sha256": "e5774693bc42815ab44858754303b3970c7e34f26a1140425dccdd5853ccfbd9",
+  "diagnostic_improvement": "Future startup should emit bounded phase receipts for validation, tokenizer load, encoding, model download/load and snapshot copy before training run_status; no auth/environment values in status.",
+  "dominant_verification_stages_seconds": {
+    "all_observed_compaction_context_token_checks": 247.5476118887491,
+    "gzip_json_canonical_metadata": 64.74824185594844,
+    "independent_fixture_oracles": 3.2640612603063346,
+    "physical_file_hashing": 7.891868817016075,
+    "receipt_projection_binding": 56.9170582989027
+  },
+  "future_prepared_cache": {
+    "active_run": "Unchanged. A cache-enabled trainer changes source/resume identity and needs a new reviewed run or explicit migration protocol.",
+    "bind": [
+      "exact e577 manifest bytes and full raw evidence inventory",
+      "tokenizer model/revision/assets, effective special IDs/padding settings and package versions",
+      "encoder/protocol/event-expansion source hashes, max_seq4096 and label policy",
+      "split/source-row/original event ordinal and trace/task IDs; exact input/output/tool schemas",
+      "ordered shard bytes plus logical row hashes; counts and token statistics"
+    ],
+    "build": "CPU-only strict verify_dataset with both native and artificial-plan opt-ins; validate actual pinned note tokenizer; encode returned augmented rows through exact production event_examples/encode_trace; independently check masks and no truncation; round-trip exact arrays",
+    "format": "Bounded deterministic non-executable shards; no pickle. Memory-mapped primitive arrays can reduce retained Python-object overhead if independently round-trip tested.",
+    "gpu_load": "Verify trusted manifest digest, all source/cache bytes, safe serialization/path/schema, integer masks and lengths, counts/order and immutable run/resume identities. Fail closed; no semantic retry/tokenization on GPU.",
+    "rebuild": "Independent CPU rebuild must reproduce all ordered logical rows exactly; deterministic serialized bytes under pinned writer/compression versions.",
+    "trust": "Independent reviewed allowlist or signed build attestation maps source+tokenizer+transform to exact approved prepared-manifest digest. A self-hashed cache claiming verified=true is not admission."
+  },
+  "head": "c2f82ade626f1fc6501885315c507572fbd25bb7",
+  "measured": {
+    "approximately_comparable_cpu_preparation_seconds": 669.1212556625178,
+    "estimated_retained_encoded_python_bytes": 2848666268,
+    "event_expansion_seconds": 7.012859864928032,
+    "production_encode_seconds": 174.6119494395898,
+    "profiler_total_seconds": 697.6308309380001,
+    "streaming_peak_rss_mib": 1294.90625,
+    "verify_seconds": 487.49644635799996
+  },
+  "schema": "picoagent.preparation.recommendation.v1",
+  "scope": "read-only local CPU measurements at c2f82ad; no active run modifications",
+  "timing_warning": "Stage inclusive times can overlap; do not sum the breakdown. Profiling excluded model download/load and dataset snapshot copy. Remote delay attribution needs remote evidence."
+}
