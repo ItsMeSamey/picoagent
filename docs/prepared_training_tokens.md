@@ -13,7 +13,7 @@ PYTHONPATH=src CUDA_VISIBLE_DEVICES='' HF_HUB_OFFLINE=1 \
   TRANSFORMERS_OFFLINE=1 TOKENIZERS_PARALLELISM=false \
   python -m picoagent.training prepare-tokens \
   --config configs/smol360m_native_t4.json \
-  --output-dir data/prepared-native-training-plans-v1 \
+  --output-dir /tmp/picoagent-prepared-rebuild \
   --tokenizer-path data/native-training-plans-v1/base/components/000/evidence/native_compaction/source/tokenizer
 ```
 
@@ -104,10 +104,42 @@ python scripts/audit_prepared_equivalence.py \
   --candidate data/prepared-native-training-plans-v1/manifest.json \
   --rebuilt data/prepared-native-training-plans-v2/manifest.json \
   --raw-profile docs/validation/20261001-cpu-preparation-profile.json \
-  --output docs/validation/20261001-prepared-equivalence.json
+  --output /tmp/picoagent-prepared-equivalence-check.json
 ```
 
 The auditor never changes the approval registry. Its report is evidence for
 independent review, not an automatic production admission decision. Candidate v1
 is retained as historical equivalence evidence; only a separately approved final
 digest may appear in the new production config.
+
+## Qualified Colab revision
+
+Revision `84f32312c35b07f923d558e30122b2ee2554a8a5` includes the approved
+v2 artifact and config. On an already authorized runtime, execute
+`scripts/colab_public_bootstrap.py` with an explicit
+`PICOAGENT_SOURCE_COMMIT=84f32312c35b07f923d558e30122b2ee2554a8a5`.
+There is no implicit bootstrap revision. The public checkout and model/data
+downloads occur on Colab; no GitHub credential is copied there.
+
+The initial bounded training invocation is:
+
+```sh
+PYTHONPATH=/content/picoagent/src TOKENIZERS_PARALLELISM=false \
+  OMP_NUM_THREADS=2 MKL_NUM_THREADS=2 PYTHONHASHSEED=20261001 \
+  python -u -m picoagent.training train \
+  --config configs/smol360m_native_t4_prepared_v2.json \
+  --segment-steps 64 --output-budget-bytes 20000000000 \
+  --output-budget-root /content
+```
+
+This pauses at the first sealed checkpoint or the 64-update cap; it does not
+complete or shorten the frozen 3,044-update schedule. Run from
+`/content/picoagent` through the detached `colab_run.py start` controller.
+Keep the off-runtime SDK collector running with `--download-workers 4`, and
+verify its durable receipt before releasing the runtime. Subsequent segments
+must resume the exact same identity; do not treat a paused segment as a finished
+model. A failed or partial download is not a resumable backup.
+
+The prepared loader was measured locally at 34.33 seconds including imports and
+config loading, versus 669.1 seconds of recorded raw preparation. These are CPU
+measurements with host/cache differences, not a guaranteed Colab speedup.
