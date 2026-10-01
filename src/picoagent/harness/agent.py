@@ -51,6 +51,7 @@ class AgentHarness:
         if not messages:
             messages = [{"role": "system", "content": self.system_prompt}]
         messages.append({"role": "user", "content": prompt})
+        issued_ids = {call["id"] for message in messages for call in message.get("tool_calls", [])}
         events: list[dict] = []
         def record(event: dict) -> None:
             events.append(copy.deepcopy(event))
@@ -75,12 +76,15 @@ class AgentHarness:
                 # Detect duplicate/reused IDs before dispatching any side effects.
                 validate_conversation(messages + [assistant], allow_pending=True)
                 calls = assistant.get("tool_calls", [])
+                if any(call["id"] in issued_ids for call in calls):
+                    raise ValueError("tool call ids must remain unique across the full episode, including compacted history")
                 if len(calls) > self.max_tool_calls_per_step:
                     raise ValueError("too many tool calls in one model response")
             except (ValueError, TypeError, KeyError) as error:
                 record({"type": "model_error", "step": step, "message": str(error)[:1000]})
                 return RunResult(messages, events, "", "invalid_model_output", step, str(error))
             messages.append(assistant)
+            issued_ids.update(call["id"] for call in calls)
             record({"type": "assistant", "step": step, "message": assistant, "input_messages": copy.deepcopy(messages[:-1])})
             if not calls:
                 return RunResult(messages, events, assistant.get("content") or "", "final", step)

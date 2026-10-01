@@ -15,9 +15,10 @@ from .provenance import checkpoint_evidence, code_evidence, environment_evidence
 
 
 def _snapshot_code(output: Path, evidence: dict[str, Any]) -> None:
-    project = Path(__file__).resolve().parents[3]
+    package = Path(__file__).resolve().parents[1]
+    project = package.parent.parent
     for relative in evidence["files"]:
-        source = project / relative
+        source = package / relative.removeprefix("src/picoagent/") if relative.startswith("src/picoagent/") else project / relative
         target = output / "source_snapshot" / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source, target)

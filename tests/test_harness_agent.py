@@ -44,7 +44,8 @@ class AgentTests(unittest.TestCase):
             tools = ToolRegistry(None, KnowledgeStore(Path(root) / "kv.json"))
             result = AgentHarness(lambda m, t: {"role": "user", "content": "x"}, tools).run("task")
             self.assertEqual(result.stop_reason, "invalid_model_output")
-            model = lambda m, t: {"role": "assistant", "tool_calls": [{"id": "same", "function": {"name": "knowledge", "arguments": '{"operation":"list"}'}}]}
+            def model(m, t):
+                return {"role": "assistant", "tool_calls": [{"id": "same", "function": {"name": "knowledge", "arguments": '{"operation":"list"}'}}]}
             result = AgentHarness(model, tools, max_steps=1).run("task")
             self.assertEqual(result.stop_reason, "max_steps")
             validate_conversation(result.messages)

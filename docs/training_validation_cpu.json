@@ -1,0 +1,68 @@
+{
+  "verified_at": "2026-10-01T11:07:09.091003+00:00",
+  "reference": {
+    "output_dir": "/tmp/picoagent-validation-reference/run",
+    "artifact": "/tmp/picoagent-validation-reference/run/final-model",
+    "training_mode": "full",
+    "precision": "fp32",
+    "device": "cpu",
+    "trainable_parameters": 90592,
+    "metrics": {
+      "training": {
+        "train_runtime": 0.2965,
+        "train_samples_per_second": 13.491,
+        "train_steps_per_second": 6.745,
+        "total_flos": 266902272.0,
+        "train_loss": 5.961413383483887,
+        "epoch": 2.0
+      },
+      "development": {
+        "eval_loss": 5.8917012214660645,
+        "eval_runtime": 0.021,
+        "eval_samples_per_second": 47.558,
+        "eval_steps_per_second": 47.558,
+        "epoch": 2.0
+      },
+      "benchmark": null
+    },
+    "smoke_only": true,
+    "interpretation": "Random model pipeline smoke, synthetic unexecuted fixture, pipeline validation only; no agent capability or benchmark claim"
+  },
+  "resumed": {
+    "output_dir": "/tmp/picoagent-validation-interrupted/run",
+    "artifact": "/tmp/picoagent-validation-interrupted/run/final-model",
+    "training_mode": "full",
+    "precision": "fp32",
+    "device": "cpu",
+    "trainable_parameters": 90592,
+    "metrics": {
+      "training": {
+        "train_runtime": 0.1254,
+        "train_samples_per_second": 31.901,
+        "train_steps_per_second": 15.951,
+        "total_flos": 266902272.0,
+        "train_loss": 2.9807066917419434,
+        "epoch": 2.0
+      },
+      "development": {
+        "eval_loss": 5.8917012214660645,
+        "eval_runtime": 0.0213,
+        "eval_samples_per_second": 46.906,
+        "eval_steps_per_second": 46.906,
+        "epoch": 2.0
+      },
+      "benchmark": null
+    },
+    "smoke_only": true
+  },
+  "all_final_tensors_exact_equal": true,
+  "stored_tensors": 16,
+  "parameters_changed": 16,
+  "hashes": {
+    "reference_model": "5ed4aafa26dcf883e1594c4e74915350008bb4874ce780c9ad1f57bbfc9ca53a",
+    "resumed_model": "5ed4aafa26dcf883e1594c4e74915350008bb4874ce780c9ad1f57bbfc9ca53a",
+    "reference_manifest": "e0c245dbfc9dbf73878cb5ace1dff2174f01809e9a7fc851ed0cf97fc552a478",
+    "resumed_manifest": "0c278ab2b4205d836f8ffb4396e355702905ed5c09365398c63f8f7a3fc287d9",
+    "resumed_checkpoint_1_manifest": "b59abca12719502df1582d49a9bca40a3982918df3c45fc77a74361ec60d9175"
+  }
+}

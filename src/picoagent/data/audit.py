@@ -51,9 +51,12 @@ def audit_tasks(tasks: Iterable[dict[str, Any]]) -> dict[str, Any]:
             "checks": ["unique_task_ids", "unique_inputs", "disjoint_families", "disjoint_templates", "original_provenance"]}
 
 
-def write_curriculum(output_dir: str | Path, tasks: list[dict[str, Any]], *, configuration: dict[str, Any]) -> Path:
+def write_curriculum(output_dir: str | Path, tasks: list[dict[str, Any]], *, configuration: dict[str, Any], split_policy: dict[str, str] | None = None) -> Path:
     from .generators import GENERATOR_VERSION, SPLIT_POLICY, authored_example
     report = audit_tasks(tasks)
+    policy = SPLIT_POLICY if split_policy is None else split_policy
+    if any(policy.get(task["family"]) != task["split"] for task in tasks):
+        raise ValueError("tasks do not match supplied split policy")
     output = Path(output_dir)
     output.mkdir(parents=True, exist_ok=False)
     files: dict[str, Any] = {}
@@ -69,7 +72,7 @@ def write_curriculum(output_dir: str | Path, tasks: list[dict[str, Any]], *, con
             files[path.name] = {"sha256": file_hash(path), "bytes": path.stat().st_size, "records": len(records), "kind": kind, "split": split}
     source_files = {p.name: file_hash(p) for p in sorted(Path(__file__).parent.glob("*.py"))}
     manifest = {"schema": "picoagent.curriculum.manifest.v1", "generator_version": GENERATOR_VERSION,
-                "configuration": configuration, "split_policy": SPLIT_POLICY, "split_policy_sha256": content_hash(SPLIT_POLICY),
+                "configuration": configuration, "split_policy": policy, "split_policy_sha256": content_hash(policy),
                 "files": files, "source_sha256": source_files, "audit": report,
                 "execution": "unexecuted", "verified_trace_count": 0,
                 "limitations": ["Authored references are not observed tool outputs or model rollouts.",
@@ -191,4 +194,13 @@ def verify_attempt(path: str | Path) -> dict[str, Any]:
         task = json.loads((directory / "task.json").read_text(encoding="utf-8"))
         if trace["task_sha256"] != content_hash(task):
             raise ValueError("trace task evidence mismatch")
+        for key in ("task_id", "family", "template_id", "split"):
+            if trace[key] != task[key]:
+                raise ValueError("trace task identity mismatch")
+        raw = json.loads((directory / "raw.json").read_text(encoding="utf-8"))
+        if "events" in raw:
+            if trace.get("tool_events", []) != [event for event in raw["events"] if event.get("type") == "tool_execution"]:
+                raise ValueError("trace tool events differ from raw execution")
+            if trace.get("model_events", []) != [event for event in raw["events"] if event.get("type") in {"assistant", "compaction"}]:
+                raise ValueError("trace model events differ from raw execution")
     return {"passed": True, "attempt_id": manifest["attempt_id"], "files": len(manifest["files"])}

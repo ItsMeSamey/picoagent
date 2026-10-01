@@ -17,6 +17,9 @@ def main(argv: list[str] | None = None) -> int:
     generate.add_argument("--seeds-per-family", type=int, default=4)
     generate.add_argument("--seed-start", type=int, default=0)
     generate.add_argument("--holdout-seeds-per-family", type=int, help="Separate dev/test count per family")
+    tool_generate = sub.add_parser("generate-tools", help="Generate separate installed-help and original module/source tasks")
+    tool_generate.add_argument("--output-dir", required=True)
+    tool_generate.add_argument("--seeds-per-family", type=int, default=8)
     validate = sub.add_parser("validate")
     validate.add_argument("--manifest", required=True)
     collect = sub.add_parser("collect", help="Collect actual scripted-teacher environment traces; requires Docker/Podman")
@@ -36,6 +39,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "generate":
         tasks = generate_tasks(seeds_per_family=args.seeds_per_family, seed_start=args.seed_start, holdout_seeds_per_family=args.holdout_seeds_per_family)
         manifest = write_curriculum(args.output_dir, tasks, configuration={"seeds_per_family": args.seeds_per_family, "seed_start": args.seed_start, "holdout_seeds_per_family": args.holdout_seeds_per_family})
+        print(canonical_json({"manifest": str(manifest), "tasks": len(tasks), "verified_traces": 0}))
+    elif args.command == "generate-tools":
+        from .tool_curriculum import TOOL_SPLIT_POLICY, generate_tool_tasks
+        tasks = generate_tool_tasks(seeds_per_family=args.seeds_per_family)
+        manifest = write_curriculum(args.output_dir, tasks, configuration={"track": "installed_help_and_original_api_v1", "seeds_per_family": args.seeds_per_family}, split_policy=TOOL_SPLIT_POLICY)
         print(canonical_json({"manifest": str(manifest), "tasks": len(tasks), "verified_traces": 0}))
     elif args.command == "validate":
         print(canonical_json(verify_curriculum(args.manifest)))

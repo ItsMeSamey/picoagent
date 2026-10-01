@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import copy
-import json
 
 import pytest
 
@@ -104,3 +103,112 @@ def test_scripted_teacher_only_requests_tools_and_stops_on_failure():
     failed = teacher([{"role": "tool", "content": canonical_json({"exit_code": 1, "stderr": "failed"}), "tool_call_id": "teacher_call_1"}], [])
     assert failed["role"] == "assistant" and not failed.get("tool_calls")
     assert failed["content"] != task["reference"]["final"]
+
+
+def test_teacher_uses_observed_docs_not_private_reference_answer():
+    task = generate_task("docs.default_override", 0)
+    task["reference"]["final"] = '{"hidden_oracle":"must not be copied"}'
+    teacher = ScriptedTeacher(task)
+    observed = [{"role": "tool", "content": canonical_json({"stdout": "weave config defaults: workers=2, format=text, retries=19."}), "tool_call_id": "test"}]
+    teacher.step = len(teacher.plan)
+    answer = teacher(observed, [])
+    assert '"retries":19' in answer["content"]
+    assert "hidden_oracle" not in answer["content"]
+
+
+def test_teacher_derives_knowledge_write_from_observed_value():
+    task = generate_task("kv.copy_value", 0)
+    teacher = ScriptedTeacher(task)
+    teacher.step = 1
+    observed = [{"role": "tool", "content": canonical_json({"key": "source", "value": 731}), "tool_call_id": "test"}]
+    result = teacher(observed, [])
+    assert '"value":731' in result["tool_calls"][0]["function"]["arguments"]
+    assert "value" not in task["reference"]["plan"][-1]["arguments"]
+
+
+def test_full_transcript_retains_calls_lost_from_compacted_context():
+    from picoagent.data.collector import _full_transcript
+    first = tool_call()
+    response = {"stdout": "1", "exit_code": 0}
+    events = [{"type": "assistant", "message": first, "input_messages": []},
+              {"type": "tool_execution", "name": "python", "tool_call_id": "c1", "result": response},
+              {"type": "compaction", "result_messages": [{"role": "user", "content": "summary"}]},
+              {"type": "assistant", "message": {"role": "assistant", "content": "done"}, "input_messages": [{"role": "user", "content": "summary"}]}]
+    full = _full_transcript("compute", events)
+    validate_messages(full)
+    assert full[2] == first
+    assert full[3]["tool_call_id"] == "c1"
+    assert full[-1]["content"] == "done"
+
+
+def test_old_generator_specs_rejected_before_collection(tmp_path):
+    task = generate_task("math.cart_total", 0)
+    task["provenance"]["generator_version"] = "original-curriculum-v1"
+    with pytest.raises(ValueError, match="excluded"):
+        collect_task(task, tmp_path)
+
+
+def _verified_unit_trace():
+    # Structural validator fixture only; never exported as real collected data.
+    trace = authored_example(generate_task("math.cart_total", 0))
+    trace["status"] = "success"
+    trace["verification"] = {"passed": True}
+    trace["provenance"]["execution"] = "verified_environment"
+    trace["provenance"]["runtime"] = {"backend": "docker", "container_id": "0" * 64, "image": "unit-test-only"}
+    trace["raw_attempt_sha256"] = "0" * 64
+    trace["model_events"] = [{"type": "assistant", "input_messages": trace["messages"][:-1], "message": trace["messages"][-1]}]
+    trace["effective_messages"] = copy.deepcopy(trace["messages"])
+    return trace
+
+
+def test_model_events_are_bound_to_verified_transcript():
+    trace = _verified_unit_trace()
+    validate_trace(trace)
+    trace["model_events"] = copy.deepcopy(trace["model_events"])
+    trace["model_events"][0]["message"]["content"] = "Unrelated injected training content"
+    with pytest.raises(DataValidationError, match="response differs"):
+        validate_trace(trace)
+    trace = _verified_unit_trace()
+    trace["model_events"] = copy.deepcopy(trace["model_events"])
+    trace["model_events"][0]["input_messages"][-1]["content"] = "Unrelated injected instruction"
+    with pytest.raises(DataValidationError, match="input does not match"):
+        validate_trace(trace)
+
+
+def test_extra_or_omitted_model_events_rejected():
+    trace = _verified_unit_trace()
+    trace["model_events"].append(copy.deepcopy(trace["model_events"][0]))
+    with pytest.raises(DataValidationError, match="no matching"):
+        validate_trace(trace)
+    trace = _verified_unit_trace()
+    trace["effective_messages"][-1]["content"] = "fake final context"
+    with pytest.raises(DataValidationError, match="final effective"):
+        validate_trace(trace)
+
+
+def test_compaction_replay_binds_summary_to_source_and_recent_suffix():
+    from picoagent.data.schema import _validate_model_event_replay
+    from picoagent.harness.context import ContextManager
+    system = {"role": "system", "content": "Unit-test system"}
+    user = {"role": "user", "content": "Solve this unit-test task. " * 60}
+    c1, c2 = tool_call("c1"), tool_call("c2")
+    r1 = {"role": "tool", "content": "1", "tool_call_id": "c1"}
+    r2 = {"role": "tool", "content": "2", "tool_call_id": "c2"}
+    prefix = [system, user, c1, r1, c2, r2]
+    context = ContextManager(lambda messages, tools: {"role": "assistant", "content": "Solve the task."}, max_tokens=8192)
+    compacted = context.compact(prefix, force=True)
+    final = {"role": "assistant", "content": "done"}
+    trace = {"messages": prefix + [final], "effective_messages": compacted.messages + [final],
+             "model_events": [{"type": "assistant", "input_messages": prefix[:2], "message": c1},
+                              {"type": "assistant", "input_messages": prefix[:4], "message": c2},
+                              compacted.event,
+                              {"type": "assistant", "input_messages": compacted.messages, "message": final}]}
+    _validate_model_event_replay(trace)
+    corrupted = copy.deepcopy(trace)
+    corrupted["model_events"][2]["summary_request"][1]["content"] = "unrelated private prompt"
+    with pytest.raises(DataValidationError, match="exact recorded source"):
+        _validate_model_event_replay(corrupted)
+    corrupted = copy.deepcopy(trace)
+    corrupted["model_events"][2]["retained_messages"] = []
+    with pytest.raises(DataValidationError, match="reconstruct"):
+        _validate_model_event_replay(corrupted)

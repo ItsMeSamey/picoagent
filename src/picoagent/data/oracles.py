@@ -49,7 +49,8 @@ def _check_svg(svg: str, expected: dict[str, Any]) -> list[str]:
         root = ET.fromstring(svg)
     except ET.ParseError:
         return ["invalid SVG XML"]
-    local = lambda tag: tag.rsplit("}", 1)[-1]
+    def local(tag):
+        return tag.rsplit("}", 1)[-1]
     if local(root.tag) != "svg":
         return ["artifact root must be svg"]
     failures: list[str] = []

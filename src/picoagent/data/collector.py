@@ -12,7 +12,7 @@ import re
 from typing import Any, Callable
 
 from .audit import AttemptArchive, read_jsonl, verify_attempt, write_new_json
-from .generators import SYSTEM_PROMPT
+from .generators import GENERATOR_VERSION, SYSTEM_PROMPT
 from .oracles import check_task_result
 from .schema import canonical_json, content_hash, validate_task, validate_trace
 
@@ -61,6 +61,21 @@ class ScriptedTeacher:
         if self.step >= len(self.plan):
             return {"role": "assistant", "content": self._final_from_observations(observations)}
         action = copy.deepcopy(self.plan[self.step])
+        if action.get("derive_local_api_from_observation"):
+            module = re.search(r"Original module (local_api_[a-f0-9]+)\.py", self.prompt).group(1)
+            documentation = observations[-1]["stdout"]
+            kind = action["derive_local_api_from_observation"]
+            if kind == "affine":
+                function = re.search(r"API callable: ([a-zA-Z0-9_]+)", documentation).group(1)
+                expression = f"[{module}.{function}(value) for value in values]"
+            elif kind == "index":
+                origin = int(re.search(r"positions are ([01])-based", documentation).group(1))
+                expression = f"[{module}.lookup(values, {origin + 2})]"
+            else:
+                convention = re.search(r"stop is (inclusive|exclusive)", documentation).group(1)
+                endpoint = 4 if convention == "inclusive" else 5
+                expression = f"{module}.select(values, 2, {endpoint})"
+            action["arguments"]["code"] = f'import json\nimport {module}\nvalues=json.load(open("input/values.json"))\nprint(json.dumps({{"values":{expression}}}))'
         if action.get("derive_value_from_observations"):
             action["arguments"]["value"] = self._kv_value(observations)
         if self.domain == "docs" and self.step == 1:
@@ -125,9 +140,20 @@ class ScriptedTeacher:
         return canonical_json({"signal": signal, "source": primary["id"]})
 
 
+def _full_transcript(prompt: str, events: list[dict]) -> list[dict]:
+    messages = [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": prompt}]
+    for event in events:
+        if event.get("type") == "assistant":
+            messages.append(event["message"])
+        elif event.get("type") == "tool_execution":
+            messages.append({"role": "tool", "name": event["name"], "tool_call_id": event["tool_call_id"], "content": canonical_json(event["result"])})
+    return messages
+
+
 def collect_task(task: dict[str, Any], archive_root: str | Path, *, model: Callable | None = None,
                  teacher_name: str | None = None, image: str = "python:3.11-slim", runtime: str | None = None,
-                 max_steps: int = 16) -> dict[str, Any]:
+                 max_steps: int = 16, context_max_tokens: int | None = 4096,
+                 context_reserve_tokens: int = 512, token_counter: Callable | None = None) -> dict[str, Any]:
     """Preserve one complete attempt, whether success, error, or unexecuted.
 
     A supplied student model receives only canonical messages and tool schemas,
@@ -136,11 +162,14 @@ def collect_task(task: dict[str, Any], archive_root: str | Path, *, model: Calla
     process death leave an inspectable unfinished attempt directory/event log.
     """
     from picoagent.harness.agent import AgentHarness
+    from picoagent.harness.context import ContextManager
     from picoagent.harness.knowledge import KnowledgeStore
     from picoagent.harness.sandbox import ContainerSandbox
     from picoagent.harness.tools import ToolRegistry
 
     validate_task(task)
+    if task["provenance"].get("generator_version") != GENERATOR_VERSION:
+        raise ValueError("task generator version is excluded or unsupported; regenerate the admitted curriculum")
     teacher = teacher_name or ("scripted_procedural_v1" if model is None else "provided_model")
     archive = AttemptArchive(archive_root, task, teacher=teacher)
     messages = [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": task["prompt"]}]
@@ -171,10 +200,24 @@ def collect_task(task: dict[str, Any], archive_root: str | Path, *, model: Calla
         for key, value in task["environment"]["kv"].items():
             knowledge.set(key, value)
         registry = ToolRegistry(backend, knowledge, search_client=LocalCorpusSearch(task["environment"]["docs"]))
-        harness = AgentHarness(observed_model, registry, max_steps=max_steps, trace_path=archive.path / "harness.jsonl", system_prompt=SYSTEM_PROMPT)
+        context = None
+        if model is not None and context_max_tokens is not None:
+            counter = token_counter
+            if counter is None and hasattr(model, "count_tokens"):
+                def counter(rows):
+                    return model.count_tokens(rows, registry.schemas)
+            if counter is None:
+                raise ValueError("model collection with compaction requires the policy tokenizer; pass token_counter or explicitly context_max_tokens=None")
+            context = ContextManager(observed_model, max_tokens=context_max_tokens, reserve_tokens=context_reserve_tokens, token_counter=counter)
+        provenance["context_compaction_enabled"] = context is not None
+        provenance["context_budget"] = {"max_tokens": context_max_tokens, "reserve_tokens": context_reserve_tokens} if context else None
+        harness = AgentHarness(observed_model, registry, context=context, max_steps=max_steps, trace_path=archive.path / "harness.jsonl", system_prompt=SYSTEM_PROMPT)
         result = harness.run(task["prompt"])
         raw["result"] = result.to_dict()
-        messages, events = result.messages, result.events
+        events = result.events
+        messages = _full_transcript(task["prompt"], events)
+        raw["effective_messages"] = result.messages
+        provenance["accepted_compactions"] = sum(event.get("type") == "compaction" and event.get("accepted") is True for event in events)
         artifact_path = task["oracle"].get("artifact_path")
         if artifact_path:
             try:
@@ -195,11 +238,7 @@ def collect_task(task: dict[str, Any], archive_root: str | Path, *, model: Calla
         journal = archive.path / "harness.jsonl"
         if journal.exists():
             events = read_jsonl(journal)
-            for event in events:
-                if event.get("type") == "assistant":
-                    messages = event["input_messages"] + [event["message"]]
-                elif event.get("type") == "tool_execution":
-                    messages.append({"role": "tool", "name": event["name"], "tool_call_id": event["tool_call_id"], "content": canonical_json(event["result"])})
+            messages = _full_transcript(task["prompt"], events)
     finally:
         if backend is not None:
             try:
@@ -211,6 +250,7 @@ def collect_task(task: dict[str, Any], archive_root: str | Path, *, model: Calla
     trace = {"schema_version": task["schema_version"], "trace_id": "attempt:" + archive.attempt_id,
              "task_id": task["task_id"], "family": task["family"], "template_id": task["template_id"], "split": task["split"],
              "task_sha256": content_hash(task), "status": status, "provenance": provenance, "messages": messages,
+             "effective_messages": raw.get("effective_messages", messages),
              "tools": registry.schemas if "registry" in locals() else [],
              "tool_events": [event for event in events if event.get("type") == "tool_execution"],
              "model_events": [event for event in events if event.get("type") in {"assistant", "compaction"}],

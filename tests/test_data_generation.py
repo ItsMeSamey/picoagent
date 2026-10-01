@@ -5,14 +5,13 @@ import copy
 import csv
 import io
 import json
-from pathlib import Path
 import shlex
 
 import pytest
 
 from picoagent.data import authored_example, check_task_result, generate_task, generate_tasks
 from picoagent.data.audit import audit_tasks, verify_curriculum, write_curriculum
-from picoagent.data.generators import FAMILY_VARIANTS, SPLIT_POLICY, svg_reference
+from picoagent.data.generators import SPLIT_POLICY, svg_reference
 from picoagent.data.schema import DataValidationError, canonical_json, training_eligible, validate_task
 
 
