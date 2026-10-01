@@ -1,0 +1,20 @@
+{
+  "actual_cpu_training_and_prepared_tests": {
+    "passed": 34,
+    "seconds": 14.45
+  },
+  "diff_check": "passed",
+  "general": {
+    "passed": 573,
+    "seconds": 47.35,
+    "skipped": 26,
+    "subtests_passed": 44
+  },
+  "gpu_tests": "not_run",
+  "learned_agent_evaluation": "not_run",
+  "prepared_manifest_sha256": "6dcd339eb9b25ea8edb2ad625b8988cf67baa814614407d983a8c5b0734945a6",
+  "ruff": "passed",
+  "schema": "picoagent.cpu-validation.v1",
+  "scope": "Full test suite plus opt-in training efficiency and prepared-data CPU proofs; no provider writes or benchmark execution.",
+  "tested_at": "2026-10-01T19:34:57+00:00"
+}

@@ -5,14 +5,16 @@ import json
 import math
 import os
 import shutil
+import tempfile
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from .config import TrainingConfig, select_precision
 from .checkpointing import CheckpointTimer
 from .data import sha256_file, verify_dataset
 from .encoding import AssistantOnlyCollator, encode_records
 from .device import resolve_device
+from .evaluation import validate_evaluation
 from .provenance import checkpoint_evidence, code_evidence, environment_evidence, now_utc, tree_hashes, verify_checkpoint, write_json, preflight_resume, cached_model_evidence
 
 
@@ -77,9 +79,20 @@ def _output_budget_reservation(output: Path, *, parameters: int, budget_bytes: i
             "filesystem_free_bytes": free_bytes}
 
 
+def _evaluate_preserving_rng(trainer: Any, evaluate: Callable[[], dict[str, Any]] | None = None) -> dict[str, Any]:
+    """Run evaluation without changing the next training step's RNG stream."""
+    with tempfile.TemporaryDirectory(prefix="picoagent-eval-rng-") as rng_dir:
+        trainer._save_rng_state(rng_dir)
+        try:
+            return (evaluate or trainer.evaluate)()
+        finally:
+            trainer._load_rng_state(rng_dir)
+
+
 def run_training(config: TrainingConfig, *, resume_from_checkpoint: str | None = None,
                  segment_steps: int | None = None, output_budget_bytes: int | None = None,
-                 output_budget_root: str | None = None) -> dict[str, Any]:
+                 output_budget_root: str | None = None,
+                 continue_through_checkpoints: bool = False) -> dict[str, Any]:
     """Train locally. Never launch/lease a GPU, push a model, or evaluate a benchmark.
 
     Full mode updates every parameter using FP32 master weights plus CUDA BF16/
@@ -93,6 +106,10 @@ def run_training(config: TrainingConfig, *, resume_from_checkpoint: str | None =
     """
     if segment_steps is not None and (type(segment_steps) is not int or segment_steps <= 0):
         raise ValueError("segment_steps must be a positive integer when supplied")
+    if type(continue_through_checkpoints) is not bool:
+        raise ValueError("continue_through_checkpoints must be a boolean")
+    if continue_through_checkpoints and segment_steps is None:
+        raise ValueError("continue_through_checkpoints requires an explicit segmented run")
     if output_budget_bytes is not None and segment_steps is None:
         raise ValueError("output_budget_bytes requires an explicit segmented run")
     if output_budget_bytes is not None and (type(output_budget_bytes) is not int or output_budget_bytes <= 0):
@@ -102,9 +119,15 @@ def run_training(config: TrainingConfig, *, resume_from_checkpoint: str | None =
     if int(os.environ.get("WORLD_SIZE", "1")) != 1:
         raise ValueError("This audited baseline supports one process/device; distributed training requires a separately validated config")
     initial_manifest_hash = sha256_file(config.dataset_manifest)
-    manifest, rows = verify_dataset(config.dataset_manifest, allow_smoke=config.smoke_test,
-                                    allow_native_teacher=config.allow_native_teacher_observed,
-                                    allow_artificial_action_plans=config.allow_artificial_action_plans)
+    prepared = None
+    if config.prepared_manifest is not None:
+        from .prepared import load_prepared_dataset
+        prepared = load_prepared_dataset(config)
+        manifest, rows = prepared.source_manifest, None
+    else:
+        manifest, rows = verify_dataset(config.dataset_manifest, allow_smoke=config.smoke_test,
+                                        allow_native_teacher=config.allow_native_teacher_observed,
+                                        allow_artificial_action_plans=config.allow_artificial_action_plans)
     if sha256_file(config.dataset_manifest) != initial_manifest_hash:
         raise ValueError("Dataset manifest changed during verification")
     if config.smoke_test != manifest.get("smoke_only", False):
@@ -145,10 +168,12 @@ def run_training(config: TrainingConfig, *, resume_from_checkpoint: str | None =
                 "cudnn_version": torch.backends.cudnn.version(), "torch_version": torch.__version__}
     # Paths may move when an ephemeral runtime is restored. Preserve original
     # paths in provenance, but compare content identity and hyperparameters.
-    identity_config = {key: value for key, value in config_payload.items() if key not in {"output_dir", "dataset_manifest"}}
+    identity_config = {key: value for key, value in config_payload.items() if key not in {"output_dir", "dataset_manifest", "prepared_manifest"}}
     identity = {"config": identity_config, "dataset_manifest_sha256": manifest_hash,
                 "source_tree_sha256": code["tree_sha256"], "precision": precision, "device": device,
                 "hardware": hardware, "environment": environment}
+    if prepared is not None:
+        identity["prepared_tokens"] = prepared.identity
     if resume_from_checkpoint:
         original = json.loads((output / "run_manifest.json").read_text())
         if original.get("identity") != identity:
@@ -157,7 +182,11 @@ def run_training(config: TrainingConfig, *, resume_from_checkpoint: str | None =
 
 
     common = {"revision": config.model_revision, "trust_remote_code": False, "local_files_only": config.smoke_test}
-    tokenizer = AutoTokenizer.from_pretrained(config.model_id, use_fast=True, **common)
+    if prepared is not None:
+        tokenizer = AutoTokenizer.from_pretrained(prepared.path.parent / "tokenizer", use_fast=True,
+                                                  trust_remote_code=False, local_files_only=True)
+    else:
+        tokenizer = AutoTokenizer.from_pretrained(config.model_id, use_fast=True, **common)
     if not tokenizer.is_fast:
         raise ValueError("The configured model must have a fast tokenizer for audited assistant-only loss")
     if tokenizer.pad_token_id is None:
@@ -165,15 +194,21 @@ def run_training(config: TrainingConfig, *, resume_from_checkpoint: str | None =
             raise ValueError("Tokenizer requires an existing pad or EOS token; no silent vocabulary changes")
         tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = "right"
-    if manifest["schema"] == "picoagent.artificial_action_plan.dataset.v1":
+    if prepared is None and manifest["schema"] == "picoagent.artificial_action_plan.dataset.v1":
         from huggingface_hub import hf_hub_download
         from picoagent.data.artificial_plans import validate_note_tokenizer
         tokenizer_json = hf_hub_download(config.model_id, "tokenizer.json",
                                          revision=config.model_revision, local_files_only=True, token=False)
         validate_note_tokenizer(config.dataset_manifest, tokenizer, model_id=config.model_id,
                                 revision=config.model_revision, tokenizer_json_path=tokenizer_json)
-    train_data, train_stats = encode_records(rows["train"], tokenizer, config.max_seq_length)
-    dev_data, dev_stats = encode_records(rows["dev"], tokenizer, config.max_seq_length)
+    if prepared is not None:
+        from .prepared import validate_training_tokenizer
+        validate_training_tokenizer(prepared, tokenizer)
+        train_data, dev_data = prepared.datasets["train"], prepared.datasets["dev"]
+        train_stats, dev_stats = prepared.stats["train"], prepared.stats["dev"]
+    else:
+        train_data, train_stats = encode_records(rows["train"], tokenizer, config.max_seq_length)
+        dev_data, dev_stats = encode_records(rows["dev"], tokenizer, config.max_seq_length)
     load_args: dict[str, Any] = dict(common, dtype=torch.float32, attn_implementation="eager")
     if config.training_mode == "qlora":
         compute_dtype = {"bf16": torch.bfloat16, "fp16": torch.float16, "fp32": torch.float32}[precision]
@@ -210,7 +245,11 @@ def run_training(config: TrainingConfig, *, resume_from_checkpoint: str | None =
         _snapshot_code(output, code)
         (output / "dataset_manifest.json").write_bytes(Path(config.dataset_manifest).read_bytes())
         dataset_snapshot = output / "dataset_snapshot"
-        if manifest["schema"] == "picoagent.artificial_action_plan.dataset.v1":
+        if prepared is not None:
+            from .prepared import copy_prepared_snapshots
+            copy_prepared_snapshots(prepared, source_destination=dataset_snapshot,
+                                    prepared_destination=output / "prepared_snapshot")
+        elif manifest["schema"] == "picoagent.artificial_action_plan.dataset.v1":
             from picoagent.data.artificial_plans import _copy_verified_plan_snapshot
             copied_manifest = _copy_verified_plan_snapshot(config.dataset_manifest, dataset_snapshot,
                 verified_manifest=manifest, expected_manifest_sha256=manifest_hash)
@@ -254,12 +293,17 @@ def run_training(config: TrainingConfig, *, resume_from_checkpoint: str | None =
         os.chmod(output / "run_manifest.json", 0o444)
     run_manifest_hash = sha256_file(output / "run_manifest.json")
 
+    trainer_holder: dict[str, Any] = {}
+
     class AuditCheckpoint(TrainerCallback):
         def __init__(self):
             self.timer = CheckpointTimer(config.checkpoint_interval_seconds)
             self.start_step: int | None = None
             self.boundary_step: int | None = None
             self.segment_checkpoint: str | None = None
+            self.last_checkpoint: str | None = None
+            self.new_checkpoints: list[str] = []
+            self.evaluate_after_save = False
 
         def on_train_begin(self, args: Any, state: Any, control: Any, **kwargs: Any) -> Any:
             self.start_step = state.global_step
@@ -269,28 +313,54 @@ def run_training(config: TrainingConfig, *, resume_from_checkpoint: str | None =
             return control
 
         def on_step_end(self, args: Any, state: Any, control: Any, **kwargs: Any) -> Any:
-            if self.boundary_step is not None and state.global_step >= self.boundary_step:
+            at_boundary = self.boundary_step is not None and state.global_step >= self.boundary_step
+            timer_due = self.timer.due()
+            if timer_due and not at_boundary:
+                control.should_save = True
+                if not config.checkpoint_before_eval:
+                    # Preserve legacy behavior unless the frozen config opts
+                    # into save-before-evaluate with an independent cadence.
+                    control.should_evaluate = True
+            if at_boundary:
                 control.should_save = True
                 control.should_training_stop = True
-                return control
-            # HF calls this after a completed optimizer step, never mid-update.
-            # Keep the configured wall-clock checkpoint policy active in a
-            # segment; the first such save is sealed and pauses in on_save.
-            if self.timer.due():
-                control.should_save = True
-                control.should_evaluate = True
+            if config.checkpoint_before_eval and control.should_save and control.should_evaluate:
+                self.evaluate_after_save = True
+                control.should_evaluate = False
             return control
 
         def on_save(self, args: Any, state: Any, control: Any, **kwargs: Any) -> Any:
             if state.is_world_process_zero:
                 checkpoint = output / f"checkpoint-{state.global_step}"
                 checkpoint_evidence(checkpoint, run_manifest_hash)
-                if segment_steps is not None:
+                self.last_checkpoint = checkpoint.name
+                self.new_checkpoints.append(checkpoint.name)
+                at_boundary = self.boundary_step is not None and state.global_step >= self.boundary_step
+                pause_first = segment_steps is not None and not continue_through_checkpoints
+                if pause_first or at_boundary:
                     self.segment_checkpoint = checkpoint.name
                     # Trainer reaches this callback only after weights,
                     # optimizer, scheduler, RNG, and trainer state are saved.
                     control.should_training_stop = True
             self.timer.mark_saved()
+            if self.evaluate_after_save:
+                self.evaluate_after_save = False
+                if not state.is_world_process_zero:
+                    raise RuntimeError("Checkpoint-before-evaluate currently requires the single-process baseline")
+                checkpoint = output / f"checkpoint-{state.global_step}"
+                checkpoint_manifest_path = checkpoint / "checkpoint_manifest.json"
+                metrics = trainer_holder["trainer"].evaluate()
+                evaluation_dir = output / "evaluations"
+                evaluation_dir.mkdir(exist_ok=True)
+                evaluation = {
+                    "schema": "picoagent.training.evaluation.v1",
+                    "checkpoint": checkpoint.name,
+                    "checkpoint_manifest_sha256": sha256_file(checkpoint_manifest_path),
+                    "global_step": state.global_step,
+                    "metrics": metrics,
+                }
+                validate_evaluation(evaluation, checkpoint)
+                write_json(evaluation_dir / f"{checkpoint.name}.json", evaluation, exclusive=True)
             return control
 
     # The global step/epoch target is still calculated from the original
@@ -306,13 +376,35 @@ def run_training(config: TrainingConfig, *, resume_from_checkpoint: str | None =
         bf16=precision == "bf16" and device != "xla", fp16=precision == "fp16", use_cpu=device == "cpu",
         seed=config.seed, data_seed=config.seed, full_determinism=config.deterministic,
         logging_steps=config.logging_steps, logging_strategy="steps", logging_nan_inf_filter=False,
-        eval_strategy="steps", eval_steps=config.save_steps, prediction_loss_only=True,
+        eval_strategy="steps", eval_steps=config.eval_steps or config.save_steps, prediction_loss_only=True,
         save_strategy="steps", save_steps=config.save_steps, save_total_limit=None,
         save_only_model=False, load_best_model_at_end=False, metric_for_best_model="eval_loss",
         greater_is_better=False, dataloader_num_workers=0,
         dataloader_pin_memory=cuda, remove_unused_columns=False, report_to=[], push_to_hub=False,
     )
     class AuditedTrainer(Trainer):
+        def _save_checkpoint(self, *args: Any, **kwargs: Any) -> None:
+            nonlocal space
+            if output_budget_bytes is not None:
+                # Check at the actual write boundary, even if legacy evaluation
+                # took a long time after on_step_end. Export chunks under the
+                # chosen root count against the same bound on every save.
+                space = _output_budget_reservation(
+                    output, parameters=total_parameters, budget_bytes=output_budget_bytes,
+                    budget_root=Path(output_budget_root) if output_budget_root else None)
+            return super()._save_checkpoint(*args, **kwargs)
+
+        def evaluate(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+            # In the opt-in policy, *every* evaluation is isolated, including
+            # independent eval-only steps. Otherwise an interruption before a
+            # deferred eval could change the resumed training RNG stream.
+            evaluate = super().evaluate
+            if config.checkpoint_before_eval:
+                metrics = _evaluate_preserving_rng(self, lambda: evaluate(*args, **kwargs))
+                trainer_holder["last_evaluation"] = (self.state.global_step, dict(metrics))
+                return metrics
+            return evaluate(*args, **kwargs)
+
         def compute_loss_context_manager(self):
             # Avoid Accelerate's legacy global XLA_USE_BF16 casting: keep master
             # weights and optimizer state FP32, autocast forward/loss only.
@@ -324,6 +416,7 @@ def run_training(config: TrainingConfig, *, resume_from_checkpoint: str | None =
     trainer = AuditedTrainer(model=model, args=arguments, train_dataset=train_data, eval_dataset=dev_data,
                       processing_class=tokenizer, data_collator=AssistantOnlyCollator(tokenizer.pad_token_id, pad_to_length=config.max_seq_length if device == "xla" else None),
                       callbacks=[checkpoint_callback])
+    trainer_holder["trainer"] = trainer
     if trainer.args.device.type != device:
         raise RuntimeError(f"Trainer selected {trainer.args.device}, expected {device}; refusing silent backend fallback")
     space = None
@@ -333,7 +426,8 @@ def run_training(config: TrainingConfig, *, resume_from_checkpoint: str | None =
     before_checkpoints = {path.name for path in output.glob("checkpoint-[0-9]*") if path.is_dir()}
     write_json(output / "run_status.json", {
         "status": "running", "started_at": now_utc(), "resume_from": resume_from_checkpoint,
-        "segment_limit_optimizer_steps": segment_steps, "output_space_preflight": space,
+        "segment_limit_optimizer_steps": segment_steps, "continue_through_checkpoints": continue_through_checkpoints,
+        "output_space_preflight": space,
     })
     try:
         result = trainer.train(resume_from_checkpoint=resume_from_checkpoint)
@@ -347,7 +441,13 @@ def run_training(config: TrainingConfig, *, resume_from_checkpoint: str | None =
                 if int(checkpoint.name.split("-")[1]) != global_step:
                     raise RuntimeError("Paused segment step differs from its sealed checkpoint")
                 added_checkpoints = {path.name for path in output.glob("checkpoint-[0-9]*") if path.is_dir()} - before_checkpoints
-                if added_checkpoints != {checkpoint.name}:
+                expected_checkpoints = set(checkpoint_callback.new_checkpoints)
+                if added_checkpoints != expected_checkpoints:
+                    raise RuntimeError("Segment checkpoint set differs from newly sealed checkpoints")
+                if continue_through_checkpoints:
+                    if global_step != checkpoint_callback.boundary_step:
+                        raise RuntimeError("Continuing segment did not reach its exact optimizer-step boundary")
+                elif added_checkpoints != {checkpoint.name}:
                     raise RuntimeError(f"Segment must add exactly one checkpoint; added {sorted(added_checkpoints)}")
                 verify_checkpoint(checkpoint, run_manifest_hash)
                 checkpoint_manifest_sha256 = sha256_file(checkpoint / "checkpoint_manifest.json")
@@ -370,6 +470,8 @@ def run_training(config: TrainingConfig, *, resume_from_checkpoint: str | None =
                     "segment_start_step": checkpoint_callback.start_step,
                     "segment_max_end_step": checkpoint_callback.boundary_step,
                     "segment_limit_optimizer_steps": segment_steps,
+                    "continue_through_checkpoints": continue_through_checkpoints,
+                    "new_checkpoints": checkpoint_callback.new_checkpoints,
                     "output_space_preflight": space,
                     "observed_output_bytes": actual_output_bytes,
                     "note": "Paused at a complete sealed checkpoint; the frozen training schedule is not complete.",
@@ -380,7 +482,10 @@ def run_training(config: TrainingConfig, *, resume_from_checkpoint: str | None =
                         "checkpoint_manifest_sha256": checkpoint_manifest_sha256,
                         "training_mode": config.training_mode, "device": device,
                         "smoke_only": config.smoke_test}
-        metrics = {"training": result.metrics, "development": trainer.evaluate(), "benchmark": None}
+        last_evaluation = trainer_holder.get("last_evaluation")
+        development = (last_evaluation[1] if config.checkpoint_before_eval and last_evaluation is not None
+                       and last_evaluation[0] == trainer.state.global_step else trainer.evaluate())
+        metrics = {"training": result.metrics, "development": development, "benchmark": None}
         final_dir = output / ("final-model" if config.training_mode == "full" else "final-adapter")
         model.config.use_cache = True
         trainer.save_model(str(final_dir))
@@ -402,7 +507,9 @@ def run_training(config: TrainingConfig, *, resume_from_checkpoint: str | None =
         write_json(output / "run_status.json", {"status": "completed", "finished_at": now_utc(), "global_step": trainer.state.global_step,
                    "planned_global_steps": trainer.state.max_steps, "mode": config.training_mode,
                    "smoke_only": config.smoke_test, "artifact": str(final_dir), "benchmark_evaluation": "not_run",
-                   "segment_limit_optimizer_steps": segment_steps, "output_space_preflight": space,
+                   "segment_limit_optimizer_steps": segment_steps,
+                   "continue_through_checkpoints": continue_through_checkpoints,
+                   "new_checkpoints": checkpoint_callback.new_checkpoints, "output_space_preflight": space,
                    "observed_output_bytes": actual_output_bytes})
         return {"output_dir": str(output), "artifact": str(final_dir), "status": "completed",
                 "global_step": trainer.state.global_step, "planned_global_steps": trainer.state.max_steps,

@@ -258,10 +258,10 @@ def _validate_resume_artifact(root: Path, config: str, manifest_relative: str, *
     effective_config["dataset_manifest"] = f"/kaggle/temp/picoagent/{manifest_relative}"
     effective_config["device"] = "cuda"
     expected_config_identity = {key: value for key, value in effective_config.items()
-                                if key not in {"output_dir", "dataset_manifest"}}
+                                if key not in {"output_dir", "dataset_manifest", "prepared_manifest"}}
     original_config = run_manifest.get("original_config")
     original_config_identity = ({key: value for key, value in original_config.items()
-                                 if key not in {"output_dir", "dataset_manifest"}}
+                                 if key not in {"output_dir", "dataset_manifest", "prepared_manifest"}}
                                 if isinstance(original_config, dict) else None)
     if (original_config_identity != expected_config_identity
             or identity.get("config") != expected_config_identity):
@@ -716,6 +716,7 @@ resume_checkpoint_path = _restore_resume_tree(
 
 def _private_source_program(config: str, transfer_manifest: dict[str, Any], manifest_bytes: bytes,
                             helper: str, helper_sha256: str, *, segment_steps: int,
+                            continue_through_checkpoints: bool = False,
                             resume: dict[str, Any] | None = None) -> str:
     _validate_handle(transfer_manifest["dataset_handle"])
     manifest_sha = _sha256_bytes(manifest_bytes)
@@ -784,10 +785,13 @@ if stage_result.get("verified") is not True:
     raise RuntimeError("Source staging did not verify extracted files")
 '''
     return prefix + _resume_restore_snippet(resume) + _training_tail(
-        config, segment_steps, resume_checkpoint=resume["checkpoint"] if resume else None)
+        config, segment_steps, continue_through_checkpoints=continue_through_checkpoints,
+        resume_checkpoint=resume["checkpoint"] if resume else None)
 
 
-def _training_tail(config: str, segment_steps: int, *, resume_checkpoint: str | None = None) -> str:
+def _training_tail(config: str, segment_steps: int, *, continue_through_checkpoints: bool = False,
+                   resume_checkpoint: str | None = None) -> str:
+    continuation_argument = ', "--continue-through-checkpoints"' if continue_through_checkpoints else ""
     resume_argument = (
         f', "--resume", str(pathlib.Path(training_config["output_dir"]) / {resume_checkpoint!r})'
         if resume_checkpoint else ""
@@ -810,7 +814,7 @@ freeze = subprocess.run([sys.executable, "-m", "pip", "freeze"], capture_output=
 (output / "environment.txt").write_text(freeze.stdout)
 command = [sys.executable, "-m", "picoagent.training", "train", "--config", str(resolved_config),
            "--segment-steps", {str(segment_steps)!r}, "--output-budget-bytes", {str(KAGGLE_OUTPUT_BUDGET_BYTES)!r},
-           "--output-budget-root", "/kaggle/working"{resume_argument}]
+           "--output-budget-root", "/kaggle/working"{continuation_argument}{resume_argument}]
 with (output / "training.log").open("w") as log:
     result = subprocess.run(command, cwd=project, stdout=log, stderr=subprocess.STDOUT, check=False)
 print((output / "training.log").read_text()[-12000:], flush=True)
@@ -850,6 +854,7 @@ def build(root: Path, destination: Path, owner: str, slug: str, config: str | No
           dataset_license_description: str | None = None,
           chunk_bytes: int = DEFAULT_KAGGLE_CHUNK_BYTES,
           segment_steps: int | None = None,
+          continue_through_checkpoints: bool = False,
           resume_kernel: str | None = None, resume_run_dir: Path | None = None,
           resume_checkpoint: str | None = None,
           resume_run_manifest_sha256: str | None = None,
@@ -858,6 +863,8 @@ def build(root: Path, destination: Path, owner: str, slug: str, config: str | No
           smoke_timeout_seconds: int = MAX_GPU_SMOKE_SECONDS) -> None:
     _validate_segment(owner, "kernel owner")
     _validate_segment(slug, "kernel slug")
+    if type(continue_through_checkpoints) is not bool:
+        raise ValueError("continue_through_checkpoints must be a bool")
     if type(smoke_timeout_seconds) is not int or not 0 < smoke_timeout_seconds <= MAX_GPU_SMOKE_SECONDS:
         raise ValueError(f"GPU smoke timeout must be in (0, {MAX_GPU_SMOKE_SECONDS} seconds]")
     if type(inline_archive_max_bytes) is not int or not 0 < inline_archive_max_bytes <= INLINE_ARCHIVE_MAX_BYTES:
@@ -872,6 +879,8 @@ def build(root: Path, destination: Path, owner: str, slug: str, config: str | No
     helper, helper_sha = _source_staging_bootstrap()
 
     if input_dataset is None:
+        if continue_through_checkpoints:
+            raise ValueError("--continue-through-checkpoints requires segmented private native-SFT input-dataset mode")
         if data_output is not None or dataset_manifest is not None or dataset_license is not None:
             raise ValueError("Private dataset options require --input-dataset owner/slug")
         if segment_steps is not None:
@@ -995,7 +1004,9 @@ def build(root: Path, destination: Path, owner: str, slug: str, config: str | No
             }
             _write_json(staged_data / "package-receipt.json", data_receipt)
             program = _private_source_program(config_relative, transfer, transfer_bytes, helper, helper_sha,
-                                              segment_steps=segment_steps, resume=resume_info)
+                                              segment_steps=segment_steps,
+                                              continue_through_checkpoints=continue_through_checkpoints,
+                                              resume=resume_info)
             package_receipt = {
                 "schema": "picoagent.kaggle-kernel-package-receipt.v1",
                 "mode": "private-input-dataset-native-sft",
@@ -1012,6 +1023,7 @@ def build(root: Path, destination: Path, owner: str, slug: str, config: str | No
                 "dataset_license": dataset_license,
                 "native_sft_configuration": True,
                 "segment_steps": segment_steps,
+                "continue_through_checkpoints": continue_through_checkpoints,
                 "output_budget_bytes": KAGGLE_OUTPUT_BUDGET_BYTES,
                 "requested_accelerator": KAGGLE_ACCELERATOR,
                 "resume_source": resume_info,
@@ -1064,6 +1076,8 @@ def main() -> None:
     parser.add_argument("--dataset-license-description", help="Required only when --dataset-license other")
     parser.add_argument("--chunk-bytes", type=int, default=DEFAULT_KAGGLE_CHUNK_BYTES, help=f"Chunk size <= {KAGGLE_CHUNK_BYTES_LIMIT} bytes")
     parser.add_argument("--segment-steps", type=int, help="Required native-SFT operational max optimizer updates per Kaggle invocation; full schedule is unchanged")
+    parser.add_argument("--continue-through-checkpoints", action="store_true",
+                        help="Continue after ordinary/timed sealed checkpoints until --segment-steps or full completion; requires private input segmented training (default: pause at the first checkpoint)")
     parser.add_argument("--resume-kernel", help="Unique prior Kaggle kernel source handle owner/slug; output is hash-pinned")
     parser.add_argument("--resume-run-dir", type=Path, help="Locally retrieved prior /kaggle/working/picoagent-training output; verified before package build")
     parser.add_argument("--resume-checkpoint", help="Exact latest paused checkpoint-N from the retrieved output")
@@ -1077,6 +1091,7 @@ def main() -> None:
           dataset_manifest=args.dataset_manifest, dataset_license=args.dataset_license,
           dataset_license_description=args.dataset_license_description,
           chunk_bytes=args.chunk_bytes, segment_steps=args.segment_steps,
+          continue_through_checkpoints=args.continue_through_checkpoints,
           resume_kernel=args.resume_kernel, resume_run_dir=args.resume_run_dir,
           resume_checkpoint=args.resume_checkpoint,
           resume_run_manifest_sha256=args.resume_run_manifest_sha256,

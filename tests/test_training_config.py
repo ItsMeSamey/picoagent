@@ -59,3 +59,22 @@ class TrainingTPUConfigTests(unittest.TestCase):
         self.assertEqual(select_precision("fp32", cuda_available=False, bf16_supported=False, xla_available=True), "fp32")
         with self.assertRaisesRegex(ValueError, "not fp16"):
             select_precision("fp16", cuda_available=False, bf16_supported=False, xla_available=True)
+
+
+class IndependentEvalConfigTests(unittest.TestCase):
+    def test_old_defaults_and_explicit_policy_are_frozen(self):
+        from dataclasses import FrozenInstanceError
+        config = TrainingConfig(model_id="org/model", model_revision="a" * 40,
+                                dataset_manifest="dataset.json", output_dir="run")
+        self.assertIsNone(config.eval_steps)
+        self.assertFalse(config.checkpoint_before_eval)
+        self.assertEqual(config.checkpoint_interval_seconds, 300.0)
+        for changes in ({"eval_steps": 0}, {"eval_steps": True}, {"eval_steps": 1.5},
+                        {"checkpoint_before_eval": 1}):
+            with self.subTest(changes=changes), self.assertRaises(ValueError):
+                TrainingConfig.from_dict({**config.as_dict(), **changes})
+        opted = TrainingConfig.from_dict({**config.as_dict(), "eval_steps": 50,
+                                         "checkpoint_before_eval": True})
+        self.assertEqual(opted.eval_steps, 50)
+        with self.assertRaises(FrozenInstanceError):
+            opted.eval_steps = 100

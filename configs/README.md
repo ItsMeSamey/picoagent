@@ -163,3 +163,31 @@ One epoch is the initial frozen training schedule, not a promise of agent
 quality or a hardware-runtime estimate. Final qualification must report paired
 full/half/manual agent results separately, including failures. Training loss,
 reference-teacher success and unit tests are not substitutes for those scores.
+
+### New-run save-before-evaluation policy
+
+For a separately named efficiency experiment, explicitly set
+`checkpoint_before_eval: true` and `eval_steps` to its frozen independent
+cadence. A wall-clock save then preserves full state without forcing evaluation;
+coincident evaluation follows checkpoint sealing and publishes a separately
+hash-bound evaluation sidecar. Defaults preserve legacy ordering/cadence. Changing
+these fields is a new run identity, never a way to resume an old configuration.
+See `docs/checkpoint_workflow.md` for the optional multi-checkpoint segment flag
+and per-checkpoint output budget checks.
+
+### Approved exact token artifact, separately named v2 run
+
+`smol360m_native_t4_prepared_v2.json` pins the reviewed artifact at
+`data/prepared-native-training-plans-v2/manifest.json` and writes only to
+`runs/smol360m-native-t4-prepared-v2`. Its complete ordered arrays are equivalent
+to the raw native/action-plan source: 48,702 train and 1,203 development examples.
+The source dataset, optimizer settings, batch/accumulation and one-epoch schedule
+remain unchanged from the native T4 preset.
+
+This new run explicitly uses `checkpoint_before_eval: true` and `eval_steps: 500`;
+`save_steps: 100` and the 600-second completed-step durability timer are retained.
+Development loss remains a training diagnostic, not an agent task-success metric.
+The older run's checkpoints cannot resume under this changed identity.
+See [exact CPU-prepared tokens](../docs/prepared_training_tokens.md), the
+[independent equivalence report](../docs/validation/20261001-prepared-equivalence.json)
+and the [separate approval record](../docs/validation/20261001-prepared-approval.json).

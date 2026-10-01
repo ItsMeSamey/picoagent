@@ -19,7 +19,8 @@ import tempfile
 import time
 from pathlib import Path
 
-from checkpoint_sync import CLITransfer, pack_checkpoint, pull_checkpoint, run_cli, sha256, upload_bundle
+from checkpoint_sync import (CLITransfer, evaluation_record, pack_checkpoint, pull_checkpoint,
+                             run_cli, sha256, upload_bundle)
 from source_staging import (DEFAULT_CHUNK_BYTES, integrity_record, matches, no_symlink_path,
                             pack_archive, relative_path)
 
@@ -318,65 +319,64 @@ def collect(client: Colab, project: str, run_dir: str, export_root: str,
         raise ValueError("--off-runtime is required: a Colab-local copy is not a backup")
     result = client.execute(remote_prelude(project) + f"""
 from pathlib import Path
-from checkpoint_sync import pack_checkpoint, sha256, BUNDLE_MANIFEST, CHECKPOINT
-run, exports = Path({json.dumps(run_dir)}), Path({json.dumps(export_root)})
+from checkpoint_sync import pack_checkpoint, evaluation_record, sha256, BUNDLE_MANIFEST, CHECKPOINT, runtime_export_roots
+from checkpoint_sync import preflight_export_trees
+from picoagent.training.evaluation import checkpoint_eval_loss
+run, exports = runtime_export_roots(Path({json.dumps(run_dir)}), Path({json.dumps(export_root)}))
 checkpoints = sorted((p for p in run.glob('checkpoint-*') if CHECKPOINT.fullmatch(p.name) and (p / 'checkpoint_manifest.json').is_file()), key=lambda p: int(p.name.split('-')[1]))
+preflight_export_trees(exports, [checkpoint.name for checkpoint in checkpoints])
 result = {{'exports': [], 'best_checkpoint': None}}
 best_loss = float('inf')
 for checkpoint in checkpoints:
+    loss = checkpoint_eval_loss(run, checkpoint.name)
     bundle = pack_checkpoint(run, checkpoint.name, exports)
-    result['exports'].append({{'name': checkpoint.name, 'path': str(bundle), 'sha256': sha256(bundle / BUNDLE_MANIFEST)}})
-    trainer = json.loads((checkpoint / 'trainer_state.json').read_text())
-    for row in trainer.get('log_history', []):
-        if row.get('step') == int(checkpoint.name.split('-')[1]) and isinstance(row.get('eval_loss'), (int, float)) and row['eval_loss'] < best_loss:
-            best_loss, result['best_checkpoint'] = row['eval_loss'], checkpoint.name
+    evaluation = evaluation_record(bundle)
+    result['exports'].append({{'name': checkpoint.name, 'path': str(bundle), 'sha256': sha256(bundle / BUNDLE_MANIFEST),
+                              'evaluation_sha256': evaluation['sha256'] if evaluation else None}})
+    if evaluation is not None:
+        loss = evaluation['eval_loss']
+    if loss is not None and loss < best_loss:
+        best_loss, result['best_checkpoint'] = loss, checkpoint.name
 print({json.dumps(OUTPUT_SENTINEL)} + json.dumps(result))
 """)
     acknowledged = {}
     for bundle in result["exports"]:
         final = pull_checkpoint(bundle["path"].lstrip("/"), destination, client.transfer(),
-                                off_runtime=off_runtime, expected_manifest_sha256=bundle["sha256"])
-        acknowledged[final.name] = sha256(final / "checkpoint_manifest.json")
+                                off_runtime=off_runtime, expected_manifest_sha256=bundle["sha256"],
+                                expected_evaluation_sha256=bundle["evaluation_sha256"])
+        if final.name != bundle["name"]:
+            raise ValueError("Collected checkpoint identity differs from advertised export")
+        acknowledged[final.name] = {
+            "checkpoint_manifest_sha256": sha256(final / "checkpoint_manifest.json"),
+            "run_manifest_sha256": sha256(destination / "run_manifest.json"),
+            "transfer_manifest_sha256": bundle["sha256"],
+            "evaluation_sha256": bundle["evaluation_sha256"],
+        }
     pruned = []
+    pending_evaluations = []
     if prune and acknowledged:
         # Remote deletion is limited to checkpoint dirs just verified on the controller.
         # Retain current latest two and best; new saves racing collection are untouched.
         remote_result = client.execute(remote_prelude(project) + f"""
-import shutil
 from pathlib import Path
-from checkpoint_sync import CHECKPOINT, sha256
-from picoagent.training.provenance import verify_checkpoint
-run = Path({json.dumps(run_dir)})
-acknowledged = {json.dumps(acknowledged)}
-best = {repr(result['best_checkpoint'])}
-checkpoints = sorted((p for p in run.glob('checkpoint-*') if CHECKPOINT.fullmatch(p.name)), key=lambda p: int(p.name.split('-')[1]))
-keep = set(p.name for p in checkpoints[-2:]) | ({{best}} if best else set())
-run_hash = sha256(run / 'run_manifest.json')
-removed = []
-for checkpoint in checkpoints:
-    if checkpoint.name in keep or checkpoint.name not in acknowledged:
-        continue
-    verify_checkpoint(checkpoint, run_hash)
-    if sha256(checkpoint / 'checkpoint_manifest.json') != acknowledged[checkpoint.name]:
-        raise ValueError('Checkpoint changed after durable acknowledgement')
-    if any(p.suffix in {{'.jsonl', '.ndjson'}} or 'trace' in p.name.lower() for p in checkpoint.rglob('*')):
-        raise ValueError('Refusing to remove a checkpoint directory containing traces')
-    shutil.rmtree(checkpoint)
-    export = Path({json.dumps(export_root)}) / checkpoint.name
-    if export.is_dir() and not export.is_symlink():
-        shutil.rmtree(export)
-    removed.append(checkpoint.name)
-print({json.dumps(OUTPUT_SENTINEL)} + json.dumps({{'pruned_runtime': removed}}))
+from checkpoint_sync import prune_runtime_exports
+result = prune_runtime_exports(Path({json.dumps(run_dir)}), Path({json.dumps(export_root)}),
+                               {repr(acknowledged)}, {repr(result['best_checkpoint'])})
+print({json.dumps(OUTPUT_SENTINEL)} + json.dumps(result))
 """)
         pruned = remote_result["pruned_runtime"]
+        pending_evaluations = remote_result["pending_evaluations"]
     return {"verified_checkpoints": list(acknowledged), "destination": str(destination),
-            "best_checkpoint": result["best_checkpoint"], "pruned_runtime": pruned}
+            "best_checkpoint": result["best_checkpoint"], "pruned_runtime": pruned,
+            "pending_evaluations": pending_evaluations}
 
 
 
 def restore(client: Colab, project: str, source: Path, checkpoint: str,
             run_dir: str, local_export: Path, remote_export: str) -> dict:
     bundle = pack_checkpoint(source, checkpoint, local_export)
+    evaluation = evaluation_record(bundle)
+    evaluation_digest = evaluation["sha256"] if evaluation else None
     remote = remote_export.rstrip("/") + "/" + checkpoint
     client.execute(f"""
 import json
@@ -396,7 +396,8 @@ run = Path({json.dumps(run_dir)})
 run.mkdir(parents=True, exist_ok=True)
 with _exclusive_lock(run):
     restored = pull_checkpoint({json.dumps(remote)}, run, LocalTransfer(), off_runtime=False,
-                               restore=True, expected_manifest_sha256={json.dumps(digest)})
+                               restore=True, expected_manifest_sha256={json.dumps(digest)},
+                               expected_evaluation_sha256={evaluation_digest!r})
 print({json.dumps(OUTPUT_SENTINEL)} + json.dumps({{'restored_checkpoint': str(restored), 'durable_backup': False}}))
 """)
 

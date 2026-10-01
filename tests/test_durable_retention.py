@@ -72,3 +72,77 @@ def test_corrupt_checkpoint_prevents_any_cleanup(archive):
     with pytest.raises(ValueError):
         apply_retention(plan, confirm_delete_old_checkpoints=True)
     assert (archive / "checkpoint-1").exists()
+
+
+def evaluation(root, step, loss):
+    path = root / "evaluations" / f"checkpoint-{step}.json"
+    path.parent.mkdir(exist_ok=True)
+    path.write_text(json.dumps({
+        "schema": "picoagent.training.evaluation.v1", "checkpoint": f"checkpoint-{step}",
+        "global_step": step, "checkpoint_manifest_sha256": sha256_file(
+            root / f"checkpoint-{step}" / "checkpoint_manifest.json"),
+        "metrics": {"eval_loss": loss},
+    }))
+    return path
+
+
+def test_bound_sidecar_best_is_preserved_and_recorded(archive):
+    sidecar = evaluation(archive, 1, .01)
+    plan = plan_retention(archive)
+    assert plan["keep"] == ["checkpoint-1", "checkpoint-4", "checkpoint-5"]
+    assert plan["checkpoints"][0]["evaluation_sha256"] == sha256_file(sidecar)
+    assert plan["checkpoints"][0]["eval_loss_at_save"] == .01
+    assert all(row["evaluation_sha256"] is None for row in plan["checkpoints"][1:])
+    assert "evaluations" in plan["preserve"]
+
+
+def test_arriving_sidecar_invalidates_prior_deletion_plan(archive):
+    plan = plan_retention(archive)
+    # Even unchanged selection must invalidate the approved evidence snapshot.
+    evaluation(archive, 1, .7)
+    with pytest.raises(ValueError, match="changed since"):
+        apply_retention(plan, confirm_delete_old_checkpoints=True)
+    assert len(list(archive.glob("checkpoint-*"))) == 5
+
+
+def test_changed_sidecar_invalidates_prior_deletion_plan(archive):
+    sidecar = evaluation(archive, 1, .7)
+    plan = plan_retention(archive)
+    sidecar.write_text(sidecar.read_text() + "\n")
+    with pytest.raises(ValueError, match="changed since"):
+        apply_retention(plan, confirm_delete_old_checkpoints=True)
+    assert len(list(archive.glob("checkpoint-*"))) == 5
+
+
+def test_malformed_sidecar_prevents_retention_plan(archive):
+    sidecar = evaluation(archive, 1, .01)
+    data = json.loads(sidecar.read_text())
+    data["checkpoint_manifest_sha256"] = "0" * 64
+    sidecar.write_text(json.dumps(data))
+    with pytest.raises(ValueError, match="hash mismatch"):
+        plan_retention(archive)
+    assert len(list(archive.glob("checkpoint-*"))) == 5
+
+
+def test_approved_fixture_cleanup_preserves_all_sidecar_evidence(archive):
+    evidence = evaluation(archive, 3, .9)
+    before = evidence.read_bytes()
+    removed = apply_retention(plan_retention(archive), confirm_delete_old_checkpoints=True)
+    assert "checkpoint-3" in removed
+    assert evidence.read_bytes() == before
+
+
+def test_sidecar_arriving_during_apply_stops_before_first_delete(archive, monkeypatch):
+    import durable_retention
+    real_hash_tree = durable_retention._hash_tree
+    plan = plan_retention(archive)
+    real_plan = durable_retention.plan_retention
+    def concurrent_evaluation(root):
+        result = real_plan(root)
+        evaluation(root, 1, .01)
+        return result
+    monkeypatch.setattr(durable_retention, "plan_retention", concurrent_evaluation)
+    monkeypatch.setattr(durable_retention, "_hash_tree", real_hash_tree)
+    with pytest.raises(ValueError, match="changed before deletion"):
+        apply_retention(plan, confirm_delete_old_checkpoints=True)
+    assert len(list(archive.glob("checkpoint-*"))) == 5

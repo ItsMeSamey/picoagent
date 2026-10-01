@@ -1,0 +1,39 @@
+{
+  "checkpoint_complete_off_runtime": false,
+  "completed_optimizer_steps": 46,
+  "dev_evaluation_seconds_reported": 587.7,
+  "dev_loss_reported_rounded": 0.2571,
+  "device": "Tesla T4",
+  "files": {
+    "paused_status.json": {
+      "bytes": 840,
+      "sha256": "d60bb6499cc8e81fc77964ac4654cf77a1cf6448560a0311e545e19dcaac0e6b"
+    },
+    "run_manifest.json": {
+      "bytes": 277646,
+      "sha256": "13c0713f4ec21f74be01e2f52551a53e02355c6723b4956fd38d81fcd8cc2234"
+    },
+    "training.log": {
+      "bytes": 84471,
+      "sha256": "9777051b271f51349ad9f95d3805d82dbdcc82fb5718ebe75c279e146467f1d0"
+    }
+  },
+  "learned_agent_scores": null,
+  "limitations": [
+    "Runtime ended during backup; termination cause is unknown.",
+    "No complete resumable checkpoint was verified.",
+    "Dev loss is not an agent benchmark score.",
+    "Published training log ends at local pause; later transport errors and provider status are recorded here as observations."
+  ],
+  "model_id": "HuggingFaceTB/SmolLM2-360M",
+  "partial_verified_chunks_preserved": true,
+  "paused_at": "2026-10-01T18:26:59.272043+00:00",
+  "planned_optimizer_steps": 3044,
+  "precision": "fp16",
+  "provider_status": "No active sessions found on server; stale local session pruned",
+  "runtime_absence_verified_at": "2026-10-01T19:05:03+00:00",
+  "schema": "picoagent.interrupted-run-evidence.v1",
+  "source_commit": "c2f82ade626f1fc6501885315c507572fbd25bb7",
+  "trainable_parameters": 361821120,
+  "training_started_at": "2026-10-01T18:04:56.175599+00:00"
+}

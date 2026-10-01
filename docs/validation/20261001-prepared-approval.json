@@ -1,0 +1,38 @@
+{
+  "approval_recorded_at": "2026-10-01T19:26:16.523307+00:00",
+  "core_python_files": 45,
+  "core_source_map_sha256": "0c85bd67edaa11aceb97c0c0b1b1aa88afbdaa308960fc3002a5e73fe2568d64",
+  "independent_audit": {
+    "path": "docs/validation/20261001-prepared-equivalence.json",
+    "script": "scripts/audit_prepared_equivalence.py",
+    "script_sha256": "641bc0967f593d85b6ad1ae78cf2a5931062276982f73256de97a719784667e3",
+    "sha256": "9a9854129bc594075dda8e1c4feb6d5f0145ac554173c495b108df58814cfc04"
+  },
+  "limitations": [
+    "CPU pipeline evidence only; no model quality or agent benchmark result",
+    "No GPU/model training launch authorized by this record",
+    "Existing c2f82 training run is a distinct identity and cannot resume with this source/config",
+    "Kaggle prepared-artifact input staging/restore requires separate integration before use"
+  ],
+  "new_config": {
+    "checkpoint_before_eval": true,
+    "checkpoint_interval_seconds": 600.0,
+    "eval_steps": 500,
+    "optimizer_data_epoch_schedule_unchanged": true,
+    "output_dir": "runs/smol360m-native-t4-prepared-v2",
+    "path": "configs/smol360m_native_t4_prepared_v2.json",
+    "save_steps": 100,
+    "sha256": "f5d0690751cf869a2c2ec662d440fae736a208bffd19a6b0fc0942fa96e96f2d"
+  },
+  "prepared_manifest": "data/prepared-native-training-plans-v2/manifest.json",
+  "prepared_manifest_sha256": "6dcd339eb9b25ea8edb2ad625b8988cf67baa814614407d983a8c5b0734945a6",
+  "raw_source_manifest_sha256": "e5774693bc42815ab44858754303b3970c7e34f26a1140425dccdd5853ccfbd9",
+  "review_basis": [
+    "Whole core Python path/hash identity, excluding only approval registry, checked before admission and after admission/encoding",
+    "Fresh CPU rebuild and standard-library independent decoding of all arrays, matching prior complete raw-path fingerprints and all candidate payload bytes",
+    "Explicit digest approval recorded separately from the original immutable audit report",
+    "Focused source-change, immutable snapshot, corrupt artifact and CPU exact resume equivalence tests passed"
+  ],
+  "schema": "picoagent.prepared_tokens.review_approval.v1",
+  "status": "approved_for_separately_named_new_run"
+}

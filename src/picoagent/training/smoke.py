@@ -16,7 +16,10 @@ from .train import run_training
 
 def run_smoke(output_dir: str | Path, *, device: str = "cpu", segment_steps: int | None = None,
               train_records: int = 2, gradient_accumulation_steps: int = 2,
-              save_steps: int = 1, checkpoint_interval_seconds: float | None = 300.0) -> dict[str, Any]:
+              save_steps: int = 1, checkpoint_interval_seconds: float | None = 300.0,
+              max_steps: int = 2, eval_steps: int | None = None,
+              checkpoint_before_eval: bool = False, continue_through_checkpoints: bool = False,
+              dropout: float = 0.0) -> dict[str, Any]:
     if device not in {"cpu", "cuda", "xla"}:
         raise ValueError("Smoke device must be explicit: cpu, cuda, or xla")
     if type(train_records) is not int or train_records < 2:
@@ -77,14 +80,16 @@ def run_smoke(output_dir: str | Path, *, device: str = "cpu", segment_steps: int
     model = GPT2LMHeadModel(GPT2Config(vocab_size=len(tokenizer), n_positions=2048, n_ctx=2048,
         n_embd=32, n_layer=1, n_head=2, bos_token_id=tokenizer.eos_token_id,
         eos_token_id=tokenizer.eos_token_id, pad_token_id=tokenizer.pad_token_id,
-        resid_pdrop=0.0, embd_pdrop=0.0, attn_pdrop=0.0))
+        resid_pdrop=dropout, embd_pdrop=dropout, attn_pdrop=dropout))
     model.save_pretrained(local_model)
     config = TrainingConfig(model_id=str(local_model), model_revision=None, dataset_manifest=str(manifest),
         output_dir=str(root / "run"), max_seq_length=2048, per_device_batch_size=1,
         gradient_accumulation_steps=gradient_accumulation_steps, gradient_checkpointing=True, learning_rate=1e-3,
-        max_steps=2, save_steps=save_steps, checkpoint_interval_seconds=checkpoint_interval_seconds,
+        max_steps=max_steps, save_steps=save_steps, checkpoint_interval_seconds=checkpoint_interval_seconds,
+        eval_steps=eval_steps, checkpoint_before_eval=checkpoint_before_eval,
         logging_steps=1, precision="auto", device=device, seed=7, smoke_test=True)
     (root / "smoke-config.json").write_text(canonical_json(config.as_dict()) + "\n")
-    result = run_training(config, segment_steps=segment_steps)
+    result = run_training(config, segment_steps=segment_steps,
+                          continue_through_checkpoints=continue_through_checkpoints)
     result["interpretation"] = "Random model pipeline smoke, synthetic unexecuted fixture, pipeline validation only; no agent capability or benchmark claim"
     return result

@@ -5,7 +5,6 @@ Run as a small Colab exec cell. This installs pinned Python training dependencie
 but never allocates compute, authenticates to GitHub, or starts training. Inspect
 /content/picoagent-bootstrap/status.json after a lost response before retrying.
 """
-from __future__ import annotations
 import importlib.metadata
 import json
 import os
@@ -14,15 +13,14 @@ import re
 import subprocess
 
 REPOSITORY = 'https://github.com/ItsMeSamey/picoagent.git'
-DEFAULT_COMMIT = '9be3c0415822bb6a72f9b7d41b2792b60e167c2e'
 PACKAGES = ('transformers==5.18.0', 'accelerate==1.15.0', 'tokenizers==0.23.2',
             'httpx[socks]==0.28.1')
 
 
 def main() -> dict:
-    commit = os.environ.get('PICOAGENT_SOURCE_COMMIT', DEFAULT_COMMIT)
+    commit = os.environ.get('PICOAGENT_SOURCE_COMMIT', '')
     if not re.fullmatch('[0-9a-f]{40}', commit):
-        raise ValueError('Source commit must be an immutable full Git SHA')
+        raise ValueError('PICOAGENT_SOURCE_COMMIT must explicitly name an immutable full Git SHA')
     project = Path('/content/picoagent')
     control = Path('/content/picoagent-bootstrap')
     if project.is_symlink() or control.is_symlink():

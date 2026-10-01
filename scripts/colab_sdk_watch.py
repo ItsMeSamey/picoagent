@@ -8,36 +8,47 @@ No allocation, authentication grant, TLS/proxy changes or teacher execution.
 import argparse
 import json
 from pathlib import Path
+import threading
 import time
 
+from checkpoint_sync import MAX_DOWNLOAD_WORKERS, validate_download_workers
 from colab_persistent_stage import PersistentSession, parse_result
 from colab_run import collect, status
 from colab_safe_cli import invoke, report_error
 
 
 class SDKTransfer:
-    def __init__(self, state, session_name):
+    def __init__(self, state, session_name, *, download_workers=1):
         self.state, self.session_name = state, session_name
+        self.download_workers = validate_download_workers(download_workers)
         self.downloads = self.bytes = 0
+        self._state_lock = threading.Lock()
+        self._progress_lock = threading.Lock()
 
     def download(self, remote, local):
         from colab_cli.contents import ContentsClient
         local = Path(local)
         local.parent.mkdir(parents=True, exist_ok=True)
-        ContentsClient(self.state.get_session(self.session_name)).download(remote, str(local))
-        self.downloads += 1
-        self.bytes += local.stat().st_size
-        if self.downloads == 1 or self.downloads % 8 == 0:
-            print(json.dumps({'downloaded_files':self.downloads, 'downloaded_bytes':self.bytes}), flush=True)
+        # Keep the official existing-session lookup/refresh serialized. Each
+        # concurrent transfer gets its own unmodified official ContentsClient.
+        with self._state_lock:
+            client = ContentsClient(self.state.get_session(self.session_name))
+        client.download(remote, str(local))
+        with self._progress_lock:
+            self.downloads += 1
+            self.bytes += local.stat().st_size
+            if self.downloads == 1 or self.downloads % 8 == 0:
+                print(json.dumps({'downloaded_files':self.downloads, 'downloaded_bytes':self.bytes}), flush=True)
 
     def upload(self, local, remote):
         raise ValueError('Checkpoint collector is download-only')
 
 
 class SDKController(PersistentSession):
-    def __init__(self, name):
+    def __init__(self, name, *, download_workers=1):
+        validate_download_workers(download_workers)
         super().__init__(name)
-        self._transfer = SDKTransfer(self.state, name)
+        self._transfer = SDKTransfer(self.state, name, download_workers=download_workers)
 
     def execute(self, code):
         return parse_result(self.runtime.execute_code(code, timeout=600))
@@ -102,10 +113,13 @@ def main():
     parser.add_argument('--off-runtime', action='store_true', required=True)
     parser.add_argument('--prune', action='store_true')
     parser.add_argument('--interval', type=int, default=120)
+    parser.add_argument('--download-workers', type=int, default=1,
+                        choices=range(1, MAX_DOWNLOAD_WORKERS + 1),
+                        help='Bounded concurrent checkpoint chunk downloads (default: serial)')
     args = parser.parse_args()
     from picoagent.training.retention import _exclusive_lock
     args.destination.mkdir(parents=True, exist_ok=True)
-    client = SDKController(args.session)
+    client = SDKController(args.session, download_workers=args.download_workers)
     with _exclusive_lock(args.destination):
         exit_code = watch(client, project=args.project, run_dir=args.run_dir,
                           export_root=args.export_root, destination=args.destination,

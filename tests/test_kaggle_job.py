@@ -65,7 +65,8 @@ def paused_resume_output(root, output, *, checkpoint_step=5, planned_steps=10, o
     if original_paths:
         config.update(original_paths)
     manifest_hash = hashlib.sha256((root / "data/native/manifest.json").read_bytes()).hexdigest()
-    identity_config = {key: value for key, value in config.items() if key not in {"output_dir", "dataset_manifest"}}
+    identity_config = {key: value for key, value in config.items()
+                       if key not in {"output_dir", "dataset_manifest", "prepared_manifest"}}
     code_files = {}
     for source_path in sorted((root / "src/picoagent").rglob("*.py")):
         code_files[source_path.relative_to(root).as_posix()] = hashlib.sha256(source_path.read_bytes()).hexdigest()
@@ -191,11 +192,13 @@ def test_private_input_dataset_is_chunked_pinned_and_not_embedded(tmp_path):
     assert "native_sft_only" in program
     assert "smoke_test" not in program
     assert '"--segment-steps", \'5\'' in program
+    assert "--continue-through-checkpoints" not in program
     assert '"--output-budget-bytes", \'20000000000\'' in program
     kernel_receipt = json.loads((kernel / "kernel-package-receipt.json").read_text())
     assert kernel_receipt["kernel_main_sha256"] == hashlib.sha256(program.encode()).hexdigest()
     assert kernel_receipt["staging_helper_sha256"] in program
     assert kernel_receipt["segment_steps"] == 5
+    assert kernel_receipt["continue_through_checkpoints"] is False
     assert kernel_receipt["output_budget_bytes"] == module.KAGGLE_OUTPUT_BUDGET_BYTES
     assert kernel_receipt["requested_accelerator"] == "NvidiaTeslaT4"
 
@@ -240,6 +243,87 @@ def test_private_input_dataset_is_chunked_pinned_and_not_embedded(tmp_path):
     assert (materialized / "configs/native.json").is_file()
     assert (materialized / "data/native/train.jsonl").read_bytes() == (root / "data/native/train.jsonl").read_bytes()
     assert not (materialized / ".env").exists()
+
+
+def test_private_training_can_continue_through_checkpoints_without_changing_config(tmp_path):
+    root = source(tmp_path)
+    kernel = tmp_path / "kernel"
+    config_path = root / "configs/native.json"
+    original_config = config_path.read_bytes()
+    module.build(
+        root, kernel, "kernel-owner", "longer-segment", "configs/native.json",
+        input_dataset="dataset-owner/native-private-bundle", data_output=tmp_path / "dataset",
+        dataset_manifest="data/native/manifest.json", dataset_license="unknown",
+        segment_steps=25, continue_through_checkpoints=True,
+    )
+    program = (kernel / "main.py").read_text()
+    compile(program, "main.py", "exec")
+    assert program.count('"--continue-through-checkpoints"') == 1
+    assert '"--segment-steps", \'25\'' in program
+    assert 'training_config["continue_through_checkpoints"]' not in program
+    assert config_path.read_bytes() == original_config
+    receipt = json.loads((kernel / "kernel-package-receipt.json").read_text())
+    assert receipt["continue_through_checkpoints"] is True
+    assert receipt["segment_steps"] == 25
+    assert receipt["provider_calls_made"] is False
+    assert receipt["kernel_main_sha256"] == hashlib.sha256(program.encode()).hexdigest()
+
+
+@pytest.mark.parametrize("invalid", [None, 0, 1, "true", "false", [], {}])
+def test_continuation_option_requires_a_real_bool(tmp_path, invalid):
+    root = source(tmp_path)
+    kernel = tmp_path / "kernel"
+    with pytest.raises(ValueError, match="continue_through_checkpoints must be a bool"):
+        module.build(root, kernel, "owner", "kernel", continue_through_checkpoints=invalid)
+    assert not kernel.exists()
+
+
+def test_continuation_requires_private_segmented_training(tmp_path):
+    root = source(tmp_path)
+    kernel = tmp_path / "kernel"
+    with pytest.raises(ValueError, match="requires segmented private native-SFT input-dataset mode"):
+        module.build(root, kernel, "owner", "kernel", continue_through_checkpoints=True)
+    assert not kernel.exists()
+    dataset = tmp_path / "dataset"
+    with pytest.raises(ValueError, match="requires a positive --segment-steps"):
+        module.build(
+            root, kernel, "owner", "kernel", "configs/native.json",
+            input_dataset="owner/private-data", data_output=dataset,
+            dataset_manifest="data/native/manifest.json", dataset_license="unknown",
+            continue_through_checkpoints=True,
+        )
+    assert not kernel.exists()
+    assert not dataset.exists()
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_cli_forwards_continuation_option(monkeypatch, tmp_path, enabled):
+    argv = [
+        "kaggle_job.py", "--owner", "owner", "--slug", "kernel", "--output", str(tmp_path / "kernel"),
+        "--config", "configs/native.json", "--input-dataset", "owner/private-data",
+        "--data-output", str(tmp_path / "dataset"), "--dataset-manifest", "data/native/manifest.json",
+        "--dataset-license", "unknown", "--segment-steps", "25",
+    ]
+    if enabled:
+        argv.append("--continue-through-checkpoints")
+    monkeypatch.setattr(sys, "argv", argv)
+    calls = []
+    monkeypatch.setattr(module, "build", lambda *args, **kwargs: calls.append((args, kwargs)))
+    module.main()
+    assert len(calls) == 1
+    assert calls[0][1]["continue_through_checkpoints"] is enabled
+    assert calls[0][1]["segment_steps"] == 25
+
+
+def test_cli_help_describes_checkpoint_continuation(monkeypatch, capsys):
+    monkeypatch.setattr(sys, "argv", ["kaggle_job.py", "--help"])
+    with pytest.raises(SystemExit) as result:
+        module.main()
+    assert result.value.code == 0
+    help_text = " ".join(capsys.readouterr().out.split())
+    assert "--continue-through-checkpoints" in help_text
+    assert "requires private input segmented training" in help_text
+    assert "default: pause at the first checkpoint" in help_text
 
 
 def test_private_dataset_needs_explicit_native_sft_and_license(tmp_path):
@@ -342,7 +426,9 @@ def test_source_tree_hash_matches_training_run_identity():
     assert module._code_tree_sha256(project_root) == code_evidence()["tree_sha256"]
 
 
-def test_prior_kernel_resume_is_hash_pinned_and_stages_only_selected_checkpoint(tmp_path):
+@pytest.mark.parametrize("continue_through_checkpoints", [False, True])
+def test_prior_kernel_resume_is_hash_pinned_and_stages_only_selected_checkpoint(
+        tmp_path, continue_through_checkpoints):
     root = source(tmp_path)
     prior = paused_resume_output(root, tmp_path / "prior-output")
     # An older checkpoint is permitted in the immutable source but is not copied.
@@ -358,6 +444,7 @@ def test_prior_kernel_resume_is_hash_pinned_and_stages_only_selected_checkpoint(
         root, kernel, "kernel-owner", "segment-two", "configs/native.json",
         input_dataset="dataset-owner/native-private-bundle", data_output=dataset,
         dataset_manifest="data/native/manifest.json", dataset_license="unknown", segment_steps=5,
+        continue_through_checkpoints=continue_through_checkpoints,
         chunk_bytes=256, resume_kernel="kernel-owner/segment-one", resume_run_dir=prior["run"],
         resume_checkpoint=prior["checkpoint"],
         resume_run_manifest_sha256=prior["run_manifest_sha256"],
@@ -368,12 +455,14 @@ def test_prior_kernel_resume_is_hash_pinned_and_stages_only_selected_checkpoint(
     program = (kernel / "main.py").read_text()
     compile(program, "main.py", "exec")
     assert "--resume" in program
+    assert ('"--continue-through-checkpoints"' in program) is continue_through_checkpoints
     assert prior["checkpoint"] in program
     assert prior["run_manifest_sha256"] in program
     assert prior["checkpoint_manifest_sha256"] in program
     receipt = json.loads((kernel / "kernel-package-receipt.json").read_text())
     assert receipt["resume_source"]["kernel_source"] == "kernel-owner/segment-one"
     assert receipt["resume_source"]["global_step"] == 5
+    assert receipt["continue_through_checkpoints"] is continue_through_checkpoints
     assert pins["planned_global_steps"] == 10
     with pytest.raises(ValueError, match="new unique kernel slug"):
         module.build(
@@ -509,3 +598,34 @@ def test_resume_identity_allows_output_and_dataset_paths_to_move(tmp_path):
         checkpoint_manifest_sha256=prior["checkpoint_manifest_sha256"],
     )
     assert result["global_step"] == 5
+
+
+def test_resume_identity_allows_prepared_path_to_move_but_preserves_manifest_pin(tmp_path):
+    root = source(tmp_path)
+    config_path = root / "configs/native.json"
+    config = json.loads(config_path.read_text())
+    config.update({
+        "prepared_manifest": "data/prepared/manifest.json",
+        "prepared_manifest_sha256": "a" * 64,
+    })
+    config_path.write_text(json.dumps(config) + "\n")
+    prior = paused_resume_output(root, tmp_path / "prior-output", original_paths={
+        "prepared_manifest": "/old/input/data/prepared/manifest.json",
+    })
+    result = module._validate_resume_artifact(
+        root, "configs/native.json", "data/native/manifest.json", run_dir=prior["run"],
+        checkpoint_name=prior["checkpoint"], run_manifest_sha256=prior["run_manifest_sha256"],
+        checkpoint_manifest_sha256=prior["checkpoint_manifest_sha256"],
+    )
+    assert result["global_step"] == 5
+    prior_with_different_pin = paused_resume_output(root, tmp_path / "prior-different-pin", original_paths={
+        "prepared_manifest": "/old/input/data/prepared/manifest.json",
+        "prepared_manifest_sha256": "b" * 64,
+    })
+    with pytest.raises(ValueError, match="Resume config differs from the original immutable training schedule"):
+        module._validate_resume_artifact(
+            root, "configs/native.json", "data/native/manifest.json",
+            run_dir=prior_with_different_pin["run"], checkpoint_name=prior_with_different_pin["checkpoint"],
+            run_manifest_sha256=prior_with_different_pin["run_manifest_sha256"],
+            checkpoint_manifest_sha256=prior_with_different_pin["checkpoint_manifest_sha256"],
+        )

@@ -1,0 +1,54 @@
+{
+  "approved_public_loader": true,
+  "approximate_local_comparison": {
+    "fraction_less": 0.9486994195513732,
+    "seconds_less": 634.7949468565166,
+    "speed_ratio": 19.4929568292393
+  },
+  "caveats": [
+    "Fresh process, but filesystem cache is warm from the build/audit; not a controlled cold-cache benchmark.",
+    "Host load, page cache and runtime conditions differ from the earlier raw profile and from Colab; this ratio is not a remote startup guarantee.",
+    "Both comparisons exclude model download/load, run snapshot copying, optimizer allocation and all training/evaluation.",
+    "Peak RSS is measured with token buffers retained. The earlier raw profile streamed/discarded encoded examples, so its RSS is not the ordinary trainer's retained-array memory.",
+    "No model was loaded or constructed; CUDA remained uninitialized."
+  ],
+  "config": "configs/smol360m_native_t4_prepared_v2.json",
+  "config_sha256": "f5d0690751cf869a2c2ec662d440fae736a208bffd19a6b0fc0942fa96e96f2d",
+  "examples": {
+    "dev": 1203,
+    "train": 48702
+  },
+  "imports_config_and_loader_wall_seconds": 34.32630880600118,
+  "loader_wall_seconds": 34.286126500002865,
+  "measured_at": "2026-10-01T19:28:43.354869+00:00",
+  "packed_token_buffer_bytes": 647352624,
+  "peak_process_rss_mib": 1012.6015625,
+  "prepared_manifest_sha256": "6dcd339eb9b25ea8edb2ad625b8988cf67baa814614407d983a8c5b0734945a6",
+  "raw_reference": {
+    "comparable_preparation_seconds": 669.1212556625178,
+    "path": "docs/validation/20261001-cpu-preparation-recommendation.json",
+    "sha256": "8e231a534474ac8a8c6161274976c2794221b3b8a720ca8d2baf03e90ac23d3d"
+  },
+  "runtime": {
+    "cuda_initialized": false,
+    "platform": "Linux-6.18.44-x86_64-with-glibc2.41",
+    "python": "3.12.14"
+  },
+  "schema": "picoagent.prepared_tokens.approved_load_profile.v1",
+  "script_sha256": "b7d609bb3befe6216cd315e12913efa987a385695925b0e21a963b56c854aee3",
+  "source_manifest_sha256": "e5774693bc42815ab44858754303b3970c7e34f26a1140425dccdd5853ccfbd9",
+  "stats": {
+    "dev": {
+      "assistant_tokens": 225408,
+      "examples": 1203,
+      "maximum_length": 3445,
+      "total_tokens": 2051093
+    },
+    "train": {
+      "assistant_tokens": 5921213,
+      "examples": 48702,
+      "maximum_length": 3436,
+      "total_tokens": 51878294
+    }
+  }
+}

@@ -73,3 +73,26 @@ def test_output_budget_refuses_symlinks_and_outside_root(tmp_path):
         with pytest.raises(ValueError, match="must contain"):
             train._output_budget_reservation(output, parameters=1, budget_bytes=10_000_000_000,
                                              budget_root=wrong_root)
+
+
+def test_continue_through_requires_explicit_segment_and_boolean():
+    with pytest.raises(ValueError, match="requires an explicit segmented run"):
+        train.run_training(config(), continue_through_checkpoints=True)
+    with pytest.raises(ValueError, match="must be a boolean"):
+        train.run_training(config(), segment_steps=1, continue_through_checkpoints=1)
+    assert "continue_through_checkpoints" not in config().as_dict()
+
+
+def test_training_cli_preserves_legacy_default_and_wires_continuation(tmp_path, capsys):
+    import json
+    from picoagent.training.__main__ import main
+    config_path = tmp_path / "config.json"
+    config_path.write_text(json.dumps(config().as_dict()))
+    base = ["train", "--config", str(config_path), "--segment-steps", "7"]
+    with patch.object(train, "run_training", return_value={}) as run:
+        assert main(base) == 0
+        assert run.call_args.kwargs["continue_through_checkpoints"] is False
+        assert main(base + ["--continue-through-checkpoints"]) == 0
+        assert run.call_args.kwargs["continue_through_checkpoints"] is True
+        assert run.call_args.kwargs["segment_steps"] == 7
+    capsys.readouterr()

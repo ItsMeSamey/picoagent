@@ -28,6 +28,8 @@ class TrainingConfig:
     max_steps: int = -1
     warmup_ratio: float = 0.03
     save_steps: int = 10
+    eval_steps: int | None = None
+    checkpoint_before_eval: bool = False
     checkpoint_interval_seconds: float | None = 300.0
     logging_steps: int = 10
     seed: int = 20261001
@@ -35,6 +37,8 @@ class TrainingConfig:
     smoke_test: bool = False
     allow_native_teacher_observed: bool = False
     allow_artificial_action_plans: bool = False
+    prepared_manifest: str | None = None
+    prepared_manifest_sha256: str | None = None
     lora_rank: int = 16
     lora_alpha: int = 32
     lora_dropout: float = 0.0
@@ -43,11 +47,20 @@ class TrainingConfig:
         for key in ("model_id", "dataset_manifest", "output_dir"):
             if not isinstance(getattr(self, key), str) or not getattr(self, key).strip():
                 raise ValueError(f"{key} must be a nonempty string")
-        for key in ("gradient_checkpointing", "deterministic", "smoke_test", "allow_native_teacher_observed", "allow_artificial_action_plans"):
+        for key in ("gradient_checkpointing", "deterministic", "smoke_test", "allow_native_teacher_observed", "allow_artificial_action_plans", "checkpoint_before_eval"):
             if not isinstance(getattr(self, key), bool):
                 raise ValueError(f"{key} must be a boolean")
         if self.device not in {"auto", "cpu", "cuda", "xla"}:
             raise ValueError("device must be auto, cpu, cuda, or xla")
+        if self.eval_steps is not None and (type(self.eval_steps) is not int or self.eval_steps <= 0):
+            raise ValueError("eval_steps must be a positive integer or null")
+        if (self.prepared_manifest is None) != (self.prepared_manifest_sha256 is None):
+            raise ValueError("prepared_manifest and prepared_manifest_sha256 must be supplied together")
+        if self.prepared_manifest is not None:
+            if not isinstance(self.prepared_manifest, str) or not self.prepared_manifest.strip():
+                raise ValueError("prepared_manifest must be a nonempty path")
+            if not isinstance(self.prepared_manifest_sha256, str) or not re.fullmatch(r"[0-9a-f]{64}", self.prepared_manifest_sha256):
+                raise ValueError("prepared_manifest_sha256 must be an explicitly pinned SHA256 digest")
         if self.training_mode not in {"full", "qlora"}:
             raise ValueError("training_mode must be full or qlora; QLoRA is not full fine-tuning")
         if self.precision not in {"auto", "bf16", "fp16", "fp32"}:

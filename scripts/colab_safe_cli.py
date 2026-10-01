@@ -12,7 +12,11 @@ import sys
 
 def report_error(label: str, error: BaseException) -> None:
     """Report locations, never exception text, source lines, URLs, or frame locals."""
-    print(f"[picoagent {label}] {type(error).__name__}", file=sys.stderr)
+    status = getattr(getattr(error, "response", None), "status_code", None)
+    # Print only a validated numeric status. Exception strings, response bodies,
+    # headers and request URLs can contain runtime credentials.
+    suffix = f" HTTP {status}" if type(status) is int and 100 <= status <= 599 else ""
+    print(f"[picoagent {label}] {type(error).__name__}{suffix}", file=sys.stderr)
     tb = error.__traceback__
     while tb is not None:
         code = tb.tb_frame.f_code

@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
 from pathlib import Path
 import re
 import shutil
@@ -20,9 +19,21 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from picoagent.training.provenance import verify_checkpoint  # noqa: E402
 from picoagent.training.retention import _exclusive_lock, _hash_tree  # noqa: E402
 from picoagent.training.data import canonical_json, sha256_bytes, sha256_file  # noqa: E402
+from picoagent.training.evaluation import checkpoint_eval_loss  # noqa: E402
 
 NAME = re.compile(r"checkpoint-(0|[1-9][0-9]*)\Z")
 SCHEMA = "picoagent.durable_retention_plan.v1"
+
+
+def evaluation_identity(root: Path, name: str) -> str | None:
+    path = root / "evaluations" / f"{name}.json"
+    if path.is_symlink() or path.parent.is_symlink():
+        raise ValueError("evaluation evidence must not be a symlink")
+    if not path.exists():
+        return None
+    if not path.is_file():
+        raise ValueError("evaluation evidence must be a regular file")
+    return sha256_file(path)
 
 
 def plan_retention(root: Path) -> dict:
@@ -50,20 +61,17 @@ def plan_retention(root: Path) -> dict:
                 or receipt_data.get("run_manifest_sha256") != run_hash
                 or receipt_data.get("off_runtime_attested") is not True):
             raise ValueError("archive receipt does not bind verified checkpoint")
-        state = json.loads((path / "trainer_state.json").read_text())
         step = int(path.name.split("-")[1])
-        if state.get("global_step") != step:
-            raise ValueError("checkpoint name and saved training step differ")
-        losses = [row["eval_loss"] for row in state.get("log_history", [])
-                  if row.get("step") == step and type(row.get("eval_loss")) in {int, float}
-                  and math.isfinite(row["eval_loss"])]
-        loss = min(losses) if losses else None
+        evaluation_hash = evaluation_identity(root, path.name)
+        loss = checkpoint_eval_loss(root, path.name)
+        if evaluation_identity(root, path.name) != evaluation_hash:
+            raise ValueError("evaluation evidence changed while planning retention")
         if loss is not None and (best is None or (loss, step) < best[:2]):
             best = (loss, step, path.name)
         entries.append({"name": path.name, "checkpoint_manifest_sha256": hashes["checkpoint_manifest.json"],
                         "tree_sha256": sha256_bytes(canonical_json(hashes).encode()),
                         "receipt_sha256": sha256_file(receipt), "bytes": sum((path / n).stat().st_size for n in hashes),
-                        "eval_loss_at_save": loss})
+                        "evaluation_sha256": evaluation_hash, "eval_loss_at_save": loss})
     keep = {row["name"] for row in entries[-2:]}
     if best:
         keep.add(best[2])
@@ -72,7 +80,7 @@ def plan_retention(root: Path) -> dict:
             "policy": "latest_two_plus_best_dev_loss", "checkpoints": entries,
             "keep": sorted(keep), "delete": delete,
             "bytes_reclaimed": sum(row["bytes"] for row in delete),
-            "irreversible": True, "preserve": ["datasets", "source", "receipts", "traces", "manifests"]}
+            "irreversible": True, "preserve": ["datasets", "source", "receipts", "traces", "manifests", "evaluations"]}
 
 
 def apply_retention(plan: dict, *, confirm_delete_old_checkpoints: bool = False) -> list[str]:
@@ -97,6 +105,9 @@ def apply_retention(plan: dict, *, confirm_delete_old_checkpoints: bool = False)
                 os.fsync(handle.fileno())
         record({"event": "approved_retention_started", "plan_sha256": digest, "plan": plan})
         for entry in plan["delete"]:
+            if any(evaluation_identity(root, row["name"]) != row["evaluation_sha256"]
+                   for row in plan["checkpoints"]):
+                raise ValueError("evaluation evidence changed before deletion; review a fresh plan")
             target = root / entry["name"]
             hashes = _hash_tree(target)
             verify_checkpoint(target, plan["run_manifest_sha256"])
