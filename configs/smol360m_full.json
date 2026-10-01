@@ -1,0 +1,23 @@
+{
+  "model_id": "HuggingFaceTB/SmolLM2-360M",
+  "model_revision": "f8027fd0eaeea54caa13c31d31b9fdc459c38b49",
+  "dataset_manifest": "data/snapshots/v1/manifest.json",
+  "output_dir": "runs/smol360m-full-v1",
+  "training_mode": "full",
+  "precision": "auto",
+  "max_seq_length": 2048,
+  "per_device_batch_size": 1,
+  "gradient_accumulation_steps": 16,
+  "gradient_checkpointing": true,
+  "learning_rate": 2e-05,
+  "weight_decay": 0.01,
+  "num_train_epochs": 1.0,
+  "max_steps": -1,
+  "warmup_ratio": 0.03,
+  "save_steps": 100,
+  "logging_steps": 10,
+  "seed": 20261001,
+  "deterministic": true,
+  "smoke_test": false,
+  "device": "auto"
+}

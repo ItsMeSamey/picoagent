@@ -1,0 +1,10 @@
+use_default_settings: true
+server:
+  bind_address: "0.0.0.0"
+  secret_key: "replace-locally-before-serving"
+search:
+  formats:
+    - html
+    - json
+# Live search is non-reproducible. Archive tool responses in every training trace.
+

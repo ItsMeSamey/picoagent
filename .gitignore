@@ -1,0 +1,26 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+.env
+.env.*
+!.env.example
+credentials*.json
+*token*.json
+.config/
+.colab-home/
+.tools/
+.bin/
+# Model weights/checkpoints must be archived with hashes and a durable URI.
+# Generated JSONL traces are deliberately NOT ignored.
+runs/**/checkpoints/
+*.safetensors
+*.pt
+*.pth
+*.bin
+*.gguf
+

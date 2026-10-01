@@ -1,0 +1,33 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "picoagent"
+version = "0.1.0"
+description = "Reproducible tiny tool-agent training and inference"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+train = ["torch>=2.6,<3", "transformers>=4.49,<5", "accelerate>=1.2,<2", "tokenizers>=0.21,<0.23"]
+qlora = ["peft>=0.14,<0.19", "bitsandbytes>=0.45,<0.49"]
+dev = ["pytest>=8,<9", "ruff>=0.11,<1"]
+colab = ["google-colab-cli==0.7.4"]
+
+[project.scripts]
+picoagent-train = "picoagent.training.__main__:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/picoagent"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]
