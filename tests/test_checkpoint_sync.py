@@ -293,3 +293,57 @@ def test_launch_reservation_blocks_duplicate_job(tmp_path, monkeypatch):
     assert json.loads((project / ".picoagent-job.json").read_text())["status"] == "starting"
     with pytest.raises(RuntimeError, match="already running"):
         start(FakeColab(), str(project), ["python", "train.py"])
+
+
+def test_low_disk_aborts_pull_before_payload_download(run, tmp_path, monkeypatch):
+    import checkpoint_sync
+    from types import SimpleNamespace
+    packed = bundle(run, tmp_path)
+    class OnlyManifest(LocalTransfer):
+        def download(self, remote, local):
+            assert remote.endswith(BUNDLE_MANIFEST), "must not download payload on insufficient disk"
+            super().download(remote, local)
+    monkeypatch.setattr(checkpoint_sync.shutil, "disk_usage", lambda path: SimpleNamespace(free=0))
+    destination = tmp_path / "durable"
+    with pytest.raises(OSError, match="Insufficient free space"):
+        pull_checkpoint(str(packed), destination, OnlyManifest(), off_runtime=True)
+    assert not (destination / "checkpoint-1").exists()
+    assert not (destination / "receipts/checkpoint-1.json").exists()
+    assert (run / "checkpoint-1/optimizer.pt").exists()
+
+
+def test_low_disk_aborts_pack_without_mutating_checkpoint(run, tmp_path, monkeypatch):
+    import checkpoint_sync
+    from types import SimpleNamespace
+    monkeypatch.setattr(checkpoint_sync.shutil, "disk_usage", lambda path: SimpleNamespace(free=0))
+    with pytest.raises(OSError, match="Insufficient free space"):
+        bundle(run, tmp_path)
+    assert (run / "checkpoint-1/optimizer.pt").exists()
+    assert not (tmp_path / "export/checkpoint-1" / BUNDLE_MANIFEST).exists()
+
+
+def test_source_archive_keeps_public_tokenizer_metadata_but_not_credentials(tmp_path):
+    root = tmp_path / "project"
+    for name in ("data/pilot/tokenizer/tokenizer.json", "data/pilot/tokenizer/special_tokens_map.json",
+                 "data/pilot/token_validation.json", "data/pilot/access_token.json"):
+        path = root / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("{}")
+    result = archive_source(root, tmp_path / "source.tar.gz")
+    assert set(result["manifest"]["files"]) == {"data/pilot/tokenizer/tokenizer.json",
+        "data/pilot/tokenizer/special_tokens_map.json", "data/pilot/token_validation.json"}
+
+
+def test_source_archive_respects_git_ignored_duplicate_working_copies(tmp_path):
+    root = tmp_path / "project"
+    root.mkdir()
+    subprocess.run(["git", "init", "-q", str(root)], check=True)
+    (root / ".gitignore").write_text("data/raw-working/\n")
+    for name in ("data/raw-working/observations.jsonl", "data/sealed/manifest.json", "src/code.py"):
+        path = root / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("{}")
+    result = archive_source(root, tmp_path / "source.tar.gz")
+    assert "data/raw-working/observations.jsonl" not in result["manifest"]["files"]
+    assert "data/sealed/manifest.json" in result["manifest"]["files"]
+    assert "src/code.py" in result["manifest"]["files"]

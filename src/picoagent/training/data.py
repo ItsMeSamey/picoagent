@@ -211,9 +211,21 @@ def prepare_dataset(train_path: str | Path, dev_path: str | Path, output_dir: st
     return path
 
 
-def verify_dataset(manifest_path: str | Path, *, allow_smoke: bool = False) -> tuple[dict[str, Any], dict[str, list[dict[str, Any]]]]:
+def verify_dataset(manifest_path: str | Path, *, allow_smoke: bool = False,
+                   allow_native_teacher: bool = False) -> tuple[dict[str, Any], dict[str, list[dict[str, Any]]]]:
     path = Path(manifest_path).resolve()
     manifest = json.loads(path.read_text(encoding="utf-8"))
+    if manifest.get("schema") == "picoagent.native_teacher.dataset.v1":
+        if not allow_native_teacher:
+            raise ValueError("Native teacher data requires explicit allow_native_teacher_observed opt-in")
+        if allow_smoke:
+            raise ValueError("Native teacher production data is not a pipeline smoke fixture")
+        from picoagent.data.native_admission import verify_native_snapshot
+        native_manifest, native_records = verify_native_snapshot(path, allow_native_teacher=True)
+        if set(native_records) != {"train", "dev"} or native_manifest.get("lockbox_used") is not False:
+            raise ValueError("Native data must contain only train/dev, never lockbox/test")
+        _check_disjoint(native_records)
+        return native_manifest, native_records
     if manifest.get("schema") != DATASET_SCHEMA or manifest.get("lockbox_used") is not False:
         raise ValueError("Invalid dataset manifest or lockbox admission")
     smoke = manifest.get("smoke_only")

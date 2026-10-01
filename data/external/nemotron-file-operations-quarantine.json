@@ -1,0 +1,31 @@
+{
+  "repo_id": "nvidia/Nemotron-Terminal-Corpus",
+  "revision": "a1667c4ffdadea02a89bffe4f1bb7ca2ff19f8d9",
+  "file": "synthetic_tasks/skill_based/easy/file_operations/data_filtered.parquet",
+  "sha256": "50cb715afdd824d33d141ccbfbe8f0cec4f2069827f4fa5eafa98e1f858b7af2",
+  "bytes": 75797216,
+  "admitted": false,
+  "purpose": "read-only source and protocol audit; not training",
+  "rows": 4954,
+  "columns": [
+    "conversations",
+    "agent",
+    "model",
+    "model_provider",
+    "date",
+    "task",
+    "episode",
+    "run_id",
+    "trial_name",
+    "enable_thinking"
+  ],
+  "observed_protocol": {
+    "agent": "terminus-2",
+    "model": "deepseek-ai/DeepSeek-V3.2",
+    "role_set": [
+      "assistant",
+      "user"
+    ],
+    "note": "Assistant/user terminal dialogue, not canonical function-call/tool-reply records. Stateful session semantics require audit before conversion."
+  }
+}

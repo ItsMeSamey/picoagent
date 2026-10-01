@@ -1,0 +1,3 @@
+{"event":"record_completed","records_sha256":"961c277e2f1cac65027bd4e4440bb35f4beacb255c72abc10a974bec313f49ec","trace_id":"native-observed-v2:luna-python-v1:py_math.invoice_total:00000000:34bd7cd5b9a343ecb2138b903fc965ea"}
+{"event":"record_completed","records_sha256":"7a62ade831fdfdc006aaeb684a668e9604a425d5bbf511a2c94711709f0078e8","trace_id":"native-observed-v2:luna-python-v1:py_docs.affine:00000000:bdd11e8026144190b15e533a31a901f7"}
+{"event":"record_completed","records_sha256":"b8a0f6e6197205cffc1960fdd0c51c2a27b68846421f504d066416ada3375cce","trace_id":"native-observed-v2:luna-python-v1:py_table.pivot_counts:00000000:6dfdb9e5bb88438fa4e61b2fe422e590"}

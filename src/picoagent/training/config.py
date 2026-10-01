@@ -33,6 +33,7 @@ class TrainingConfig:
     seed: int = 20261001
     deterministic: bool = True
     smoke_test: bool = False
+    allow_native_teacher_observed: bool = False
     lora_rank: int = 16
     lora_alpha: int = 32
     lora_dropout: float = 0.0
@@ -41,7 +42,7 @@ class TrainingConfig:
         for key in ("model_id", "dataset_manifest", "output_dir"):
             if not isinstance(getattr(self, key), str) or not getattr(self, key).strip():
                 raise ValueError(f"{key} must be a nonempty string")
-        for key in ("gradient_checkpointing", "deterministic", "smoke_test"):
+        for key in ("gradient_checkpointing", "deterministic", "smoke_test", "allow_native_teacher_observed"):
             if not isinstance(getattr(self, key), bool):
                 raise ValueError(f"{key} must be a boolean")
         if self.device not in {"auto", "cpu", "cuda", "xla"}:
@@ -77,6 +78,8 @@ class TrainingConfig:
                 raise ValueError(f"{key} must be finite and in [0, 1)")
         if self.smoke_test and self.training_mode != "full":
             raise ValueError("CPU pipeline smoke tests use full mode only")
+        if self.smoke_test and self.allow_native_teacher_observed:
+            raise ValueError("Smoke fixtures cannot opt into native teacher production data")
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> "TrainingConfig":

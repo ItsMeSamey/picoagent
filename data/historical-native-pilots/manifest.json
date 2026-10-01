@@ -1,0 +1,558 @@
+{
+  "schema": "picoagent.historical_evidence_archive.v1",
+  "training_eligible": false,
+  "archives": {
+    "native-pilot-v1.tar.gz": {
+      "sha256": "21558c678e2f802bb18db9f3bed58af5e2eabc07051de7a42e7ee9b3a281aeac",
+      "bytes": 65036,
+      "source_directory": "data/native-pilot-v1",
+      "files": {
+        "evidence/luna_cli/auxiliary/annotation_packets/dev.prefix_only_packets.jsonl": {
+          "sha256": "c04053bf967b7dfb63b71a20795faecb2d54651eec14da63d28a84c6b685f874",
+          "bytes": 3833
+        },
+        "evidence/luna_cli/auxiliary/annotation_packets/manifest.json": {
+          "sha256": "b8fe077e1af7594536dd19f1013f7e66a2468c0c47bac46d9978d404339211d6",
+          "bytes": 724
+        },
+        "evidence/luna_cli/auxiliary/annotation_packets/test.prefix_only_packets.jsonl": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        "evidence/luna_cli/auxiliary/annotation_packets/train.prefix_only_packets.jsonl": {
+          "sha256": "1dc08b978da353ed184a7568e2f0c21f476695f0cbc59ee1de2633d29e792ec9",
+          "bytes": 1879
+        },
+        "evidence/luna_cli/auxiliary/attempt_index.jsonl": {
+          "sha256": "69a392eca52510edb6a7d6a8604d8e335ad723f1b26c7894af22b169b859220e",
+          "bytes": 1454
+        },
+        "evidence/luna_cli/auxiliary/attempts/6377582664c484cf/attempt-0001/attempt_manifest.json": {
+          "sha256": "6445ec8529710277f083e3bc14d43d9e8ac43a11856418271334ed62ea0e5b6a",
+          "bytes": 743
+        },
+        "evidence/luna_cli/auxiliary/attempts/6377582664c484cf/attempt-0001/events.jsonl": {
+          "sha256": "1477bc32b1c6a0c2aacf5bff94779a09a34d6b7a83eb64bde2d14c04ae59b236",
+          "bytes": 6734
+        },
+        "evidence/luna_cli/auxiliary/attempts/6377582664c484cf/attempt-0001/result/manifest.json": {
+          "sha256": "0bf01edcbc9694cf035ec85f106aeb051069c5eed83534da30a7e8ad6331d9c4",
+          "bytes": 466
+        },
+        "evidence/luna_cli/auxiliary/attempts/6377582664c484cf/attempt-0001/result/observations.jsonl": {
+          "sha256": "084c01a9f5f4505b09ba42300176227e15bdda41e78ff55dd0e08cb7cf8448f8",
+          "bytes": 9595
+        },
+        "evidence/luna_cli/auxiliary/attempts/80735d9903ef6b6b/attempt-0001/attempt_manifest.json": {
+          "sha256": "d96c4a0e8fca1d6ef90f84402324fdfa4b168d9cf417871391629aa855435ba3",
+          "bytes": 742
+        },
+        "evidence/luna_cli/auxiliary/attempts/80735d9903ef6b6b/attempt-0001/events.jsonl": {
+          "sha256": "6f5cdec1fe38184303ef0afe3b62c92bb14c07d4bbbdd2e1ce9bbf08413d8463",
+          "bytes": 8772
+        },
+        "evidence/luna_cli/auxiliary/attempts/80735d9903ef6b6b/attempt-0001/result/manifest.json": {
+          "sha256": "ccd2d7e941c1b62df116d9b6defd2695a49786c33d30c583f3333e1eddf6bb21",
+          "bytes": 466
+        },
+        "evidence/luna_cli/auxiliary/attempts/80735d9903ef6b6b/attempt-0001/result/observations.jsonl": {
+          "sha256": "571aa6ed68cafc5c55bb47ef21274563952065734bf914c233f3037279e9d6f0",
+          "bytes": 11681
+        },
+        "evidence/luna_cli/candidates/000.jsonl": {
+          "sha256": "c5aa689a12d0d7b9427d8a6a8695890ede78b4dbbbf54206899b86750951f359",
+          "bytes": 8443
+        },
+        "evidence/luna_cli/candidates/001.jsonl": {
+          "sha256": "a2c64bb5811b9326bd70149daee9d6f74aaec965e8ab6d5804aaccf855155e49",
+          "bytes": 8221
+        },
+        "evidence/luna_cli/observations/000.jsonl": {
+          "sha256": "084c01a9f5f4505b09ba42300176227e15bdda41e78ff55dd0e08cb7cf8448f8",
+          "bytes": 9595
+        },
+        "evidence/luna_cli/review.json": {
+          "sha256": "9e1cdab6bd7e30ca364870f0eb0dffb4bb83e66874f80ff7a62b67a7e4b64b01",
+          "bytes": 2531
+        },
+        "evidence/luna_cli/source/source_snapshot_manifest.json": {
+          "sha256": "2df68958e9509ab666d15702933850647aceeafb219e56d0cf62b789220a31f0",
+          "bytes": 1532
+        },
+        "evidence/luna_cli/source/src/picoagent/data/audit.py": {
+          "sha256": "aa959b3922e2b2070f154411bf73723c6020cfb79ba7f3f93e28ed943764b0bf",
+          "bytes": 10969
+        },
+        "evidence/luna_cli/source/src/picoagent/data/collector.py": {
+          "sha256": "19fec3a742cf005bb4326cca891fd95f08db3af68371a389eff1b74d905b3ac0",
+          "bytes": 18736
+        },
+        "evidence/luna_cli/source/src/picoagent/data/generators.py": {
+          "sha256": "b131966272ba85288361c4fd2d32f7b3ed739c1cb0dab86be5a593de380a98c3",
+          "bytes": 19544
+        },
+        "evidence/luna_cli/source/src/picoagent/data/luna_cli_curriculum.py": {
+          "sha256": "1ed2e8576d6ba3182321f6ccbda7004ae5d8296350cbe0e7524c636664bce80f",
+          "bytes": 85422
+        },
+        "evidence/luna_cli/source/src/picoagent/data/oracles.py": {
+          "sha256": "97bd931fd5faa7486f48564a9bdc4eeb0d591824acd832aad3d8566df7815f78",
+          "bytes": 3949
+        },
+        "evidence/luna_cli/source/src/picoagent/data/schema.py": {
+          "sha256": "1313c71cfb9cda4960284dd1efc5da3bd796ddf23f54ae80bd37f6b67c6e8730",
+          "bytes": 15695
+        },
+        "evidence/luna_cli/source/src/picoagent/harness/agent.py": {
+          "sha256": "f97a88c3ea800abcb3a16e593247c56506430559728021785042b511c1a8ec8d",
+          "bytes": 5573
+        },
+        "evidence/luna_cli/source/src/picoagent/harness/knowledge.py": {
+          "sha256": "890fab1f71109d77d0fe83331cc2eb2b3704c755be69cc6ab27e7b1b9d6207f4",
+          "bytes": 3332
+        },
+        "evidence/luna_cli/source/src/picoagent/harness/sandbox.py": {
+          "sha256": "1e255497c00f68b8217a79c6de56cc523e308d243e935672016c53c7adc81305",
+          "bytes": 14050
+        },
+        "evidence/luna_cli/source/src/picoagent/harness/tools.py": {
+          "sha256": "72315a78fe82416e6471329955df8b7f28998727a4b7f7d84fa2906095bed0a8",
+          "bytes": 7484
+        },
+        "evidence/luna_cli/source/tool_protocol.json": {
+          "sha256": "8d027fb438f386707d7b4e2b8180ba3f2934c0608af77ccee36740980774d8c4",
+          "bytes": 2204
+        },
+        "evidence/luna_cli/tasks/000.jsonl": {
+          "sha256": "210d9b4de6e621431ab4b23ec45b11a030c9890e427abedb635d7013d803991a",
+          "bytes": 18037
+        },
+        "evidence/luna_cli/tasks/001.jsonl": {
+          "sha256": "1913399325664518a15b0272daebd46463b922c6abb6604f726491557e32c0bf",
+          "bytes": 18631
+        }
+      }
+    },
+    "native-pilot-v2.tar.gz": {
+      "sha256": "384e1af478d08a04a3d0a5516b10310d742383ac45fa903cb644a1719aa1fafe",
+      "bytes": 136953,
+      "source_directory": "data/native-pilot-v2",
+      "files": {
+        "all_projected_observations.jsonl": {
+          "sha256": "04be26a2a77625587075da31149db95589ba9d3ac7167f39ce869f967f962680",
+          "bytes": 84575
+        },
+        "dev.jsonl": {
+          "sha256": "4304e7cd7a81b02a49bf563161110c1d5158dc1c176ba95abbea5d0cb6ab8421",
+          "bytes": 46528
+        },
+        "evidence/luna_cli/auxiliary/annotation_packets/dev.prefix_only_packets.jsonl": {
+          "sha256": "c04053bf967b7dfb63b71a20795faecb2d54651eec14da63d28a84c6b685f874",
+          "bytes": 3833
+        },
+        "evidence/luna_cli/auxiliary/annotation_packets/manifest.json": {
+          "sha256": "b8fe077e1af7594536dd19f1013f7e66a2468c0c47bac46d9978d404339211d6",
+          "bytes": 724
+        },
+        "evidence/luna_cli/auxiliary/annotation_packets/test.prefix_only_packets.jsonl": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        "evidence/luna_cli/auxiliary/annotation_packets/train.prefix_only_packets.jsonl": {
+          "sha256": "1dc08b978da353ed184a7568e2f0c21f476695f0cbc59ee1de2633d29e792ec9",
+          "bytes": 1879
+        },
+        "evidence/luna_cli/auxiliary/attempt_index.jsonl": {
+          "sha256": "69a392eca52510edb6a7d6a8604d8e335ad723f1b26c7894af22b169b859220e",
+          "bytes": 1454
+        },
+        "evidence/luna_cli/auxiliary/attempts/6377582664c484cf/attempt-0001/attempt_manifest.json": {
+          "sha256": "6445ec8529710277f083e3bc14d43d9e8ac43a11856418271334ed62ea0e5b6a",
+          "bytes": 743
+        },
+        "evidence/luna_cli/auxiliary/attempts/6377582664c484cf/attempt-0001/events.jsonl": {
+          "sha256": "1477bc32b1c6a0c2aacf5bff94779a09a34d6b7a83eb64bde2d14c04ae59b236",
+          "bytes": 6734
+        },
+        "evidence/luna_cli/auxiliary/attempts/6377582664c484cf/attempt-0001/result/manifest.json": {
+          "sha256": "0bf01edcbc9694cf035ec85f106aeb051069c5eed83534da30a7e8ad6331d9c4",
+          "bytes": 466
+        },
+        "evidence/luna_cli/auxiliary/attempts/6377582664c484cf/attempt-0001/result/observations.jsonl": {
+          "sha256": "084c01a9f5f4505b09ba42300176227e15bdda41e78ff55dd0e08cb7cf8448f8",
+          "bytes": 9595
+        },
+        "evidence/luna_cli/auxiliary/attempts/80735d9903ef6b6b/attempt-0001/attempt_manifest.json": {
+          "sha256": "d96c4a0e8fca1d6ef90f84402324fdfa4b168d9cf417871391629aa855435ba3",
+          "bytes": 742
+        },
+        "evidence/luna_cli/auxiliary/attempts/80735d9903ef6b6b/attempt-0001/events.jsonl": {
+          "sha256": "6f5cdec1fe38184303ef0afe3b62c92bb14c07d4bbbdd2e1ce9bbf08413d8463",
+          "bytes": 8772
+        },
+        "evidence/luna_cli/auxiliary/attempts/80735d9903ef6b6b/attempt-0001/result/manifest.json": {
+          "sha256": "ccd2d7e941c1b62df116d9b6defd2695a49786c33d30c583f3333e1eddf6bb21",
+          "bytes": 466
+        },
+        "evidence/luna_cli/auxiliary/attempts/80735d9903ef6b6b/attempt-0001/result/observations.jsonl": {
+          "sha256": "571aa6ed68cafc5c55bb47ef21274563952065734bf914c233f3037279e9d6f0",
+          "bytes": 11681
+        },
+        "evidence/luna_cli/candidates/000.jsonl": {
+          "sha256": "c5aa689a12d0d7b9427d8a6a8695890ede78b4dbbbf54206899b86750951f359",
+          "bytes": 8443
+        },
+        "evidence/luna_cli/candidates/001.jsonl": {
+          "sha256": "a2c64bb5811b9326bd70149daee9d6f74aaec965e8ab6d5804aaccf855155e49",
+          "bytes": 8221
+        },
+        "evidence/luna_cli/observations/000.jsonl": {
+          "sha256": "084c01a9f5f4505b09ba42300176227e15bdda41e78ff55dd0e08cb7cf8448f8",
+          "bytes": 9595
+        },
+        "evidence/luna_cli/observations/001.jsonl": {
+          "sha256": "571aa6ed68cafc5c55bb47ef21274563952065734bf914c233f3037279e9d6f0",
+          "bytes": 11681
+        },
+        "evidence/luna_cli/review.json": {
+          "sha256": "9e1cdab6bd7e30ca364870f0eb0dffb4bb83e66874f80ff7a62b67a7e4b64b01",
+          "bytes": 2531
+        },
+        "evidence/luna_cli/source/source_snapshot_manifest.json": {
+          "sha256": "2df68958e9509ab666d15702933850647aceeafb219e56d0cf62b789220a31f0",
+          "bytes": 1532
+        },
+        "evidence/luna_cli/source/src/picoagent/data/__pycache__/luna_cli_curriculum.cpython-312.pyc": {
+          "sha256": "63c8030cc91dfb97ecdf5896d9663c5acb9025e44ff693898e7e6e85460384e0",
+          "bytes": 106005
+        },
+        "evidence/luna_cli/source/src/picoagent/data/audit.py": {
+          "sha256": "aa959b3922e2b2070f154411bf73723c6020cfb79ba7f3f93e28ed943764b0bf",
+          "bytes": 10969
+        },
+        "evidence/luna_cli/source/src/picoagent/data/collector.py": {
+          "sha256": "19fec3a742cf005bb4326cca891fd95f08db3af68371a389eff1b74d905b3ac0",
+          "bytes": 18736
+        },
+        "evidence/luna_cli/source/src/picoagent/data/generators.py": {
+          "sha256": "b131966272ba85288361c4fd2d32f7b3ed739c1cb0dab86be5a593de380a98c3",
+          "bytes": 19544
+        },
+        "evidence/luna_cli/source/src/picoagent/data/luna_cli_curriculum.py": {
+          "sha256": "1ed2e8576d6ba3182321f6ccbda7004ae5d8296350cbe0e7524c636664bce80f",
+          "bytes": 85422
+        },
+        "evidence/luna_cli/source/src/picoagent/data/oracles.py": {
+          "sha256": "97bd931fd5faa7486f48564a9bdc4eeb0d591824acd832aad3d8566df7815f78",
+          "bytes": 3949
+        },
+        "evidence/luna_cli/source/src/picoagent/data/schema.py": {
+          "sha256": "1313c71cfb9cda4960284dd1efc5da3bd796ddf23f54ae80bd37f6b67c6e8730",
+          "bytes": 15695
+        },
+        "evidence/luna_cli/source/src/picoagent/harness/agent.py": {
+          "sha256": "f97a88c3ea800abcb3a16e593247c56506430559728021785042b511c1a8ec8d",
+          "bytes": 5573
+        },
+        "evidence/luna_cli/source/src/picoagent/harness/knowledge.py": {
+          "sha256": "890fab1f71109d77d0fe83331cc2eb2b3704c755be69cc6ab27e7b1b9d6207f4",
+          "bytes": 3332
+        },
+        "evidence/luna_cli/source/src/picoagent/harness/sandbox.py": {
+          "sha256": "1e255497c00f68b8217a79c6de56cc523e308d243e935672016c53c7adc81305",
+          "bytes": 14050
+        },
+        "evidence/luna_cli/source/src/picoagent/harness/tools.py": {
+          "sha256": "72315a78fe82416e6471329955df8b7f28998727a4b7f7d84fa2906095bed0a8",
+          "bytes": 7484
+        },
+        "evidence/luna_cli/source/tool_protocol.json": {
+          "sha256": "8d027fb438f386707d7b4e2b8180ba3f2934c0608af77ccee36740980774d8c4",
+          "bytes": 2204
+        },
+        "evidence/luna_cli/tasks/000.jsonl": {
+          "sha256": "210d9b4de6e621431ab4b23ec45b11a030c9890e427abedb635d7013d803991a",
+          "bytes": 18037
+        },
+        "evidence/luna_cli/tasks/001.jsonl": {
+          "sha256": "1913399325664518a15b0272daebd46463b922c6abb6604f726491557e32c0bf",
+          "bytes": 18631
+        },
+        "manifest.json": {
+          "sha256": "0d2581e6c82e6549e2e2abd84605eeee2040155b64632aa6e5281575e07d91e4",
+          "bytes": 6535
+        },
+        "train.jsonl": {
+          "sha256": "74eddfc2ae21c18bd04ff89c3349e16fc03816954c58309967b81552aa22759d",
+          "bytes": 38047
+        }
+      }
+    },
+    "native-pilot-v3.tar.gz": {
+      "sha256": "66229b6e9dc883481c795a90b7577ccef7ba30174f1d5282e85b119198977094",
+      "bytes": 137150,
+      "source_directory": "data/native-pilot-v3",
+      "files": {
+        "all_projected_observations.jsonl": {
+          "sha256": "265d9ade28aeda04060db30e847c8ab35ec6e6c154d75d50aa68b8e3388e0e21",
+          "bytes": 84683
+        },
+        "dev.jsonl": {
+          "sha256": "f553479eefadebbaeb017ed09b35390bb3b0c3ba45a9bcc51f294ff0f7294717",
+          "bytes": 46582
+        },
+        "evidence/luna_cli/auxiliary/annotation_packets/dev.prefix_only_packets.jsonl": {
+          "sha256": "c04053bf967b7dfb63b71a20795faecb2d54651eec14da63d28a84c6b685f874",
+          "bytes": 3833
+        },
+        "evidence/luna_cli/auxiliary/annotation_packets/manifest.json": {
+          "sha256": "800a6ecc6853a2a1ea2a27cb7def476c19836162879b693235e49a101c8bd0c0",
+          "bytes": 724
+        },
+        "evidence/luna_cli/auxiliary/annotation_packets/test.prefix_only_packets.jsonl": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        "evidence/luna_cli/auxiliary/annotation_packets/train.prefix_only_packets.jsonl": {
+          "sha256": "1dc08b978da353ed184a7568e2f0c21f476695f0cbc59ee1de2633d29e792ec9",
+          "bytes": 1879
+        },
+        "evidence/luna_cli/auxiliary/attempt_index.jsonl": {
+          "sha256": "cb8e5044d9d5a240b17b470c4f0211d8fc3d120d8e5b63a8aa51211ab8489972",
+          "bytes": 1454
+        },
+        "evidence/luna_cli/auxiliary/attempts/6377582664c484cf/attempt-0001/attempt_manifest.json": {
+          "sha256": "9a576fc48769bb7c4ebcaa8fe56ef900090f6f903a8dbdea9dddff180d04a273",
+          "bytes": 743
+        },
+        "evidence/luna_cli/auxiliary/attempts/6377582664c484cf/attempt-0001/events.jsonl": {
+          "sha256": "e5eeb1efc22d1597f490415ddb861a863d444797eaeeef9c0b42a8e17c97c80b",
+          "bytes": 6734
+        },
+        "evidence/luna_cli/auxiliary/attempts/6377582664c484cf/attempt-0001/result/manifest.json": {
+          "sha256": "f2416c03786eacb3e2db5be7f933cc58e486c57ca9f900944b3e037d5b3a13e9",
+          "bytes": 466
+        },
+        "evidence/luna_cli/auxiliary/attempts/6377582664c484cf/attempt-0001/result/observations.jsonl": {
+          "sha256": "b6ee1c41862db525c1171a728e579996dca3eb721b0127e22138105f6dfc8f06",
+          "bytes": 9595
+        },
+        "evidence/luna_cli/auxiliary/attempts/80735d9903ef6b6b/attempt-0001/attempt_manifest.json": {
+          "sha256": "f3dc4890072a7a9bd9716e34ed5eff478e2ea1fb678a196d56d25320ff697b48",
+          "bytes": 742
+        },
+        "evidence/luna_cli/auxiliary/attempts/80735d9903ef6b6b/attempt-0001/events.jsonl": {
+          "sha256": "9c6081f46f00f1317fd9ecb4a0862ee87ae58f932d8d35f86d6ef78727c0aaa7",
+          "bytes": 8772
+        },
+        "evidence/luna_cli/auxiliary/attempts/80735d9903ef6b6b/attempt-0001/result/manifest.json": {
+          "sha256": "38dc11508d955cc3332b2d92750c567cd46b6a0edfd768461d3d6e6752accd11",
+          "bytes": 466
+        },
+        "evidence/luna_cli/auxiliary/attempts/80735d9903ef6b6b/attempt-0001/result/observations.jsonl": {
+          "sha256": "feacff2158bfc5af30f1c8f3b698b0d912d361f9367c754090ffa335497bccad",
+          "bytes": 11681
+        },
+        "evidence/luna_cli/candidates/000.jsonl": {
+          "sha256": "c5aa689a12d0d7b9427d8a6a8695890ede78b4dbbbf54206899b86750951f359",
+          "bytes": 8443
+        },
+        "evidence/luna_cli/candidates/001.jsonl": {
+          "sha256": "a2c64bb5811b9326bd70149daee9d6f74aaec965e8ab6d5804aaccf855155e49",
+          "bytes": 8221
+        },
+        "evidence/luna_cli/observations/000.jsonl": {
+          "sha256": "b6ee1c41862db525c1171a728e579996dca3eb721b0127e22138105f6dfc8f06",
+          "bytes": 9595
+        },
+        "evidence/luna_cli/observations/001.jsonl": {
+          "sha256": "feacff2158bfc5af30f1c8f3b698b0d912d361f9367c754090ffa335497bccad",
+          "bytes": 11681
+        },
+        "evidence/luna_cli/review.json": {
+          "sha256": "ebd121ad55050d4e68aa339b3ba2a739e5f6628fd121beb18f164995accb3f8c",
+          "bytes": 2585
+        },
+        "evidence/luna_cli/source/source_snapshot_manifest.json": {
+          "sha256": "ad2d590adc3d5851005a349f7c8132ea36a78332500c83f1c1733e222866f007",
+          "bytes": 1532
+        },
+        "evidence/luna_cli/source/src/picoagent/data/__pycache__/luna_cli_curriculum.cpython-312.pyc": {
+          "sha256": "bd82f19850bf91a4fee3d345665c936268141e6de96740a0a0c0c96ab16a304e",
+          "bytes": 106041
+        },
+        "evidence/luna_cli/source/src/picoagent/data/audit.py": {
+          "sha256": "aa959b3922e2b2070f154411bf73723c6020cfb79ba7f3f93e28ed943764b0bf",
+          "bytes": 10969
+        },
+        "evidence/luna_cli/source/src/picoagent/data/collector.py": {
+          "sha256": "19fec3a742cf005bb4326cca891fd95f08db3af68371a389eff1b74d905b3ac0",
+          "bytes": 18736
+        },
+        "evidence/luna_cli/source/src/picoagent/data/generators.py": {
+          "sha256": "b131966272ba85288361c4fd2d32f7b3ed739c1cb0dab86be5a593de380a98c3",
+          "bytes": 19544
+        },
+        "evidence/luna_cli/source/src/picoagent/data/luna_cli_curriculum.py": {
+          "sha256": "7a544186badd4129f7d10669c263fe57953295a7b7d838ac193c596f0972555a",
+          "bytes": 85611
+        },
+        "evidence/luna_cli/source/src/picoagent/data/oracles.py": {
+          "sha256": "97bd931fd5faa7486f48564a9bdc4eeb0d591824acd832aad3d8566df7815f78",
+          "bytes": 3949
+        },
+        "evidence/luna_cli/source/src/picoagent/data/schema.py": {
+          "sha256": "1313c71cfb9cda4960284dd1efc5da3bd796ddf23f54ae80bd37f6b67c6e8730",
+          "bytes": 15695
+        },
+        "evidence/luna_cli/source/src/picoagent/harness/agent.py": {
+          "sha256": "f97a88c3ea800abcb3a16e593247c56506430559728021785042b511c1a8ec8d",
+          "bytes": 5573
+        },
+        "evidence/luna_cli/source/src/picoagent/harness/knowledge.py": {
+          "sha256": "890fab1f71109d77d0fe83331cc2eb2b3704c755be69cc6ab27e7b1b9d6207f4",
+          "bytes": 3332
+        },
+        "evidence/luna_cli/source/src/picoagent/harness/sandbox.py": {
+          "sha256": "1e255497c00f68b8217a79c6de56cc523e308d243e935672016c53c7adc81305",
+          "bytes": 14050
+        },
+        "evidence/luna_cli/source/src/picoagent/harness/tools.py": {
+          "sha256": "72315a78fe82416e6471329955df8b7f28998727a4b7f7d84fa2906095bed0a8",
+          "bytes": 7484
+        },
+        "evidence/luna_cli/source/tool_protocol.json": {
+          "sha256": "8d027fb438f386707d7b4e2b8180ba3f2934c0608af77ccee36740980774d8c4",
+          "bytes": 2204
+        },
+        "evidence/luna_cli/tasks/000.jsonl": {
+          "sha256": "210d9b4de6e621431ab4b23ec45b11a030c9890e427abedb635d7013d803991a",
+          "bytes": 18037
+        },
+        "evidence/luna_cli/tasks/001.jsonl": {
+          "sha256": "1913399325664518a15b0272daebd46463b922c6abb6604f726491557e32c0bf",
+          "bytes": 18631
+        },
+        "manifest.json": {
+          "sha256": "a0f153ad15f9dee89640102a951bf76a3d4d911410b281a88c3f4258edf3ee92",
+          "bytes": 6535
+        },
+        "train.jsonl": {
+          "sha256": "4e5affad41236b468ad30f4396d4616a18652a13ae98831d937e768ca0434924",
+          "bytes": 38101
+        }
+      }
+    },
+    "native-python-pilot-v1.tar.gz": {
+      "sha256": "49edf837673b61e1c77d132a6d752cd653aa64a8d3d1f2b18f87159fc68322e9",
+      "bytes": 93550,
+      "source_directory": "data/native-python-pilot-v1",
+      "files": {
+        "all_projected_observations.jsonl": {
+          "sha256": "39eeff6a81552d8e96fab30dd16c4187310ff85af4d67cfbdb51f1d4d2d0bcb6",
+          "bytes": 160656
+        },
+        "dev.jsonl": {
+          "sha256": "3567031885d9876e5c23b99e00fcd423bf60c3bbe6b87d4976334debd8378523",
+          "bytes": 50420
+        },
+        "evidence/luna_python/auxiliary/candidate_plans.unexecuted.jsonl": {
+          "sha256": "4773377987440eb7a46c4d1bccc898ff2477a98cce324281b4acbcdc7971ed79",
+          "bytes": 3585
+        },
+        "evidence/luna_python/auxiliary/events/34bd7cd5b9a343ecb2138b903fc965ea.events.jsonl": {
+          "sha256": "e0eb0010b28239c783bc33f199937e2cf31f71833753a61e9ecd5e31d90d61ce",
+          "bytes": 10043
+        },
+        "evidence/luna_python/auxiliary/events/6dfdb9e5bb88438fa4e61b2fe422e590.events.jsonl": {
+          "sha256": "015656591d91221426f72add8520a1ebc06b550bd255776f558d7ed1cd511243",
+          "bytes": 10726
+        },
+        "evidence/luna_python/auxiliary/events/bdd11e8026144190b15e533a31a901f7.events.jsonl": {
+          "sha256": "1426f514b38d8186d30c3a62e09150de51538b4b9b66cf1c1eefc8e12b9510dc",
+          "bytes": 16129
+        },
+        "evidence/luna_python/auxiliary/failures.jsonl": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        "evidence/luna_python/auxiliary/manifest.json": {
+          "sha256": "4cd45ab1b7f89945962ff47b5c4b3c9da75295e623be25d7f2c0efc721c174d9",
+          "bytes": 3944
+        },
+        "evidence/luna_python/auxiliary/progress.jsonl": {
+          "sha256": "3ee4252274e918305630ccba147864d90eab5c0381f3301f76f44da01c05c42f",
+          "bytes": 665
+        },
+        "evidence/luna_python/auxiliary/records.jsonl": {
+          "sha256": "b8a0f6e6197205cffc1960fdd0c51c2a27b68846421f504d066416ada3375cce",
+          "bytes": 50635
+        },
+        "evidence/luna_python/candidates/000.jsonl": {
+          "sha256": "4773377987440eb7a46c4d1bccc898ff2477a98cce324281b4acbcdc7971ed79",
+          "bytes": 3585
+        },
+        "evidence/luna_python/observations/000.jsonl": {
+          "sha256": "b8a0f6e6197205cffc1960fdd0c51c2a27b68846421f504d066416ada3375cce",
+          "bytes": 50635
+        },
+        "evidence/luna_python/review.json": {
+          "sha256": "7b822c152fbd83909dc5bda2ebb10d5d2772a266ec488ef84be6cbc33fa93d10",
+          "bytes": 2146
+        },
+        "evidence/luna_python/source/data/luna-python-v1/__pycache__/record_native_pilot_v2.cpython-312.pyc": {
+          "sha256": "abcc9a15d23977504499a5aa67fdf96cb8dbfeeeb0dab1a4716b488d8caf2691",
+          "bytes": 27861
+        },
+        "evidence/luna_python/source/data/luna-python-v1/record_native_pilot_v2.py": {
+          "sha256": "b3b065f54e024d151d5950b04fc17a12e50c4c64c949f50dca033fc21993c239",
+          "bytes": 21335
+        },
+        "evidence/luna_python/source/source_observation_manifest.json": {
+          "sha256": "4cd45ab1b7f89945962ff47b5c4b3c9da75295e623be25d7f2c0efc721c174d9",
+          "bytes": 3944
+        },
+        "evidence/luna_python/source/src/picoagent/data/luna_python_curriculum.py": {
+          "sha256": "21b5fade5342958c9defebe78f85c7c6c67dcad83960efa08970138c9fb9b158",
+          "bytes": 36103
+        },
+        "evidence/luna_python/source/src/picoagent/data/oracles.py": {
+          "sha256": "97bd931fd5faa7486f48564a9bdc4eeb0d591824acd832aad3d8566df7815f78",
+          "bytes": 3949
+        },
+        "evidence/luna_python/source/src/picoagent/data/schema.py": {
+          "sha256": "b7660fa2dbdbb75a486d29cd12e51bc430e6ec96d90bcfae7685d1c6bbc8aaed",
+          "bytes": 19349
+        },
+        "evidence/luna_python/source/src/picoagent/harness/agent.py": {
+          "sha256": "f97a88c3ea800abcb3a16e593247c56506430559728021785042b511c1a8ec8d",
+          "bytes": 5573
+        },
+        "evidence/luna_python/source/src/picoagent/harness/sandbox.py": {
+          "sha256": "1e255497c00f68b8217a79c6de56cc523e308d243e935672016c53c7adc81305",
+          "bytes": 14050
+        },
+        "evidence/luna_python/source/src/picoagent/harness/tools.py": {
+          "sha256": "72315a78fe82416e6471329955df8b7f28998727a4b7f7d84fa2906095bed0a8",
+          "bytes": 7484
+        },
+        "evidence/luna_python/tasks/000.jsonl": {
+          "sha256": "32a9f5e5fc2414879d4c4f348accf7265870a1bedcf02b5edab7fae6f8c89c00",
+          "bytes": 20454
+        },
+        "evidence/luna_python/tasks/001.jsonl": {
+          "sha256": "33166ca08c3e84ccc80bfd16542d125e8c1cdf47a759d7e27937818b03dd140c",
+          "bytes": 10512
+        },
+        "manifest.json": {
+          "sha256": "64b3402e4471a756025966c5aa58e7534cd7444177ab2e250dddbd1b686918c0",
+          "bytes": 4825
+        },
+        "train.jsonl": {
+          "sha256": "9b02c2773eaefd761edca635c621c0a367785f9dd59260e17fd11efdef0bc4d7",
+          "bytes": 110236
+        }
+      }
+    }
+  }
+}

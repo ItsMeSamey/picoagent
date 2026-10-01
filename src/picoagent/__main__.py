@@ -18,7 +18,8 @@ def main() -> None:
     parser.add_argument("--output", default="runs/inference")
     parser.add_argument("--max-steps", type=int, default=16)
     parser.add_argument("--context", type=int, default=4096)
-    parser.add_argument("--max-new-tokens", type=int, default=512)
+    parser.add_argument("--compaction-mode", choices=["full", "half", "manual"], default="half")
+    parser.add_argument("--max-new-tokens", type=int, default=768)
     args = parser.parse_args()
     from picoagent.harness import AgentHarness, ContainerSandbox, ContextManager, KnowledgeStore, ToolRegistry
     from picoagent.harness.search import SearXNGSearch
@@ -34,6 +35,8 @@ def main() -> None:
         context = ContextManager(
             policy, max_tokens=args.context, reserve_tokens=args.max_new_tokens,
             token_counter=lambda messages: policy.count_tokens(messages, tools.schemas),
+            mode=args.compaction_mode,
+            request_token_counter=lambda messages: policy.count_tokens(messages, []),
         )
         harness = AgentHarness(policy, tools, context=context, max_steps=args.max_steps,
                                trace_path=episode / "events.jsonl")

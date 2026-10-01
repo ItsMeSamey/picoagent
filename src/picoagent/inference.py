@@ -31,6 +31,7 @@ class HFPolicy:
         from transformers import AutoModelForCausalLM, AutoTokenizer, set_seed
 
         set_seed(seed)
+        self.seed = seed
         if device == "auto":
             device = "cuda" if torch.cuda.is_available() else "cpu"
         if device not in {"cpu", "cuda"}:

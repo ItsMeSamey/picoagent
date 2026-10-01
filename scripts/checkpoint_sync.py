@@ -225,6 +225,9 @@ def pack_checkpoint(run_dir: Path, name: str, export_root: Path, chunk_bytes: in
             files.extend(sorted(source.rglob("*")))
         elif source.is_file():
             files.append(source)
+    required = sum(source.stat().st_size for source in files if source.is_file()) + 256 * 1024 * 1024
+    if shutil.disk_usage(export_root).free < required:
+        raise OSError("Insufficient free space for checkpoint export; existing checkpoints remain untouched")
     records = {}
     for source in files:
         if not source.is_file():
@@ -329,6 +332,11 @@ def pull_checkpoint(remote: str, destination: Path, transfer: LocalTransfer | CL
                     if saved.is_symlink() or not saved.is_file() or sha256(saved) != info["sha256"]:
                         raise ValueError("Previously saved run snapshot failed integrity verification")
                 return final
+    # Keep room for both downloaded chunks and atomic materialization. Existing
+    # checkpoints are never deleted implicitly to make an incoming transfer fit.
+    required = 2 * sum(info["bytes"] for info in manifest["files"].values()) + 256 * 1024 * 1024
+    if shutil.disk_usage(destination).free < required:
+        raise OSError("Insufficient free space for checkpoint download and atomic reconstruction")
     cache = incoming / name / manifest_digest / "chunks"
     cache.mkdir(parents=True, exist_ok=True)
     stage = incoming / f"materialize-{name}-{uuid.uuid4().hex}"

@@ -153,7 +153,8 @@ def _full_transcript(prompt: str, events: list[dict]) -> list[dict]:
 def collect_task(task: dict[str, Any], archive_root: str | Path, *, model: Callable | None = None,
                  teacher_name: str | None = None, image: str = "python:3.11-slim", runtime: str | None = None,
                  max_steps: int = 16, context_max_tokens: int | None = 4096,
-                 context_reserve_tokens: int = 512, token_counter: Callable | None = None) -> dict[str, Any]:
+                 context_reserve_tokens: int = 512, token_counter: Callable | None = None,
+                 context_mode: str = "half", request_token_counter: Callable | None = None) -> dict[str, Any]:
     """Preserve one complete attempt, whether success, error, or unexecuted.
 
     A supplied student model receives only canonical messages and tool schemas,
@@ -220,9 +221,16 @@ def collect_task(task: dict[str, Any], archive_root: str | Path, *, model: Calla
                     return model.count_tokens(rows, registry.schemas)
             if counter is None:
                 raise ValueError("model collection with compaction requires the policy tokenizer; pass token_counter or explicitly context_max_tokens=None")
-            context = ContextManager(observed_model, max_tokens=context_max_tokens, reserve_tokens=context_reserve_tokens, token_counter=counter)
+            request_counter = request_token_counter
+            if request_counter is None and hasattr(model, "count_tokens"):
+                def request_counter(rows):
+                    return model.count_tokens(rows, [])
+            context = ContextManager(observed_model, max_tokens=context_max_tokens, reserve_tokens=context_reserve_tokens,
+                                     token_counter=counter, mode=context_mode, request_token_counter=request_counter)
         provenance["context_compaction_enabled"] = context is not None
-        provenance["context_budget"] = {"max_tokens": context_max_tokens, "reserve_tokens": context_reserve_tokens} if context else None
+        provenance["context_mode"] = context_mode if context else None
+        provenance["context_budget"] = {"max_tokens": context_max_tokens, "reserve_tokens": context_reserve_tokens,
+                                        "compaction_headroom_tokens": context.compaction_headroom_tokens} if context else None
         harness = AgentHarness(observed_model, registry, context=context, max_steps=max_steps, trace_path=archive.path / "harness.jsonl", system_prompt=SYSTEM_PROMPT)
         result = harness.run(task["prompt"])
         raw["result"] = result.to_dict()

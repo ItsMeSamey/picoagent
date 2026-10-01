@@ -24,3 +24,18 @@ runs/**/checkpoints/
 *.bin
 *.gguf
 
+
+# Raw 10k replay working copy is preserved byte-for-byte in the reviewed,
+# bounded archives under data/native-cli-10k-v1/evidence/ (not deleted).
+/data/luna-cli-v1/native_teacher_observed/batch_train_dev_10k_v1/
+# Reviewed public tokenizer assets and non-secret token-count audit reports.
+!data/**/tokenizer/tokenizer.json
+!data/**/tokenizer/tokenizer_config.json
+!data/**/tokenizer/special_tokens_map.json
+!data/**/token_validation.json
+!data/native-source-reviews/cli-10k-token-audit.json
+# Immutable complete copies are in data/historical-native-pilots/*.tar.gz.
+/data/native-pilot-v1/
+/data/native-pilot-v2/
+/data/native-pilot-v3/
+/data/native-python-pilot-v1/

@@ -5,7 +5,7 @@
   "output_dir": "runs/smol360m-qlora-v1",
   "training_mode": "qlora",
   "precision": "auto",
-  "max_seq_length": 2048,
+  "max_seq_length": 4096,
   "per_device_batch_size": 1,
   "gradient_accumulation_steps": 16,
   "gradient_checkpointing": true,

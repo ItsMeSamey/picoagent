@@ -1,0 +1,58 @@
+{
+  "schema": "picoagent.external-candidate.v1",
+  "repo_id": "nvidia/Nemotron-Terminal-Corpus",
+  "revision": "a1667c4ffdadea02a89bffe4f1bb7ca2ff19f8d9",
+  "license": "cc-by-4.0",
+  "source_url": "https://huggingface.co/datasets/nvidia/Nemotron-Terminal-Corpus",
+  "admitted": false,
+  "status": "metadata_review_only",
+  "blocked_path_prefixes": [
+    "dataset_adapters/",
+    "synthetic_tasks/seed_based/"
+  ],
+  "candidate_files": [
+    {
+      "path": "synthetic_tasks/skill_based/easy/data_processing/data_filtered.parquet",
+      "bytes": 76808989
+    },
+    {
+      "path": "synthetic_tasks/skill_based/easy/data_querying/data_filtered.parquet",
+      "bytes": 82052503
+    },
+    {
+      "path": "synthetic_tasks/skill_based/easy/data_science/data_filtered.parquet",
+      "bytes": 83741178
+    },
+    {
+      "path": "synthetic_tasks/skill_based/easy/debugging/data_filtered.parquet",
+      "bytes": 86704551
+    },
+    {
+      "path": "synthetic_tasks/skill_based/easy/dependency_management/data_filtered.parquet",
+      "bytes": 95057310
+    },
+    {
+      "path": "synthetic_tasks/skill_based/easy/file_operations/data_filtered.parquet",
+      "bytes": 75797216
+    },
+    {
+      "path": "synthetic_tasks/skill_based/easy/scientific_computing/data_filtered.parquet",
+      "bytes": 80224866
+    },
+    {
+      "path": "synthetic_tasks/skill_based/easy/security/data_filtered.parquet",
+      "bytes": 102981255
+    },
+    {
+      "path": "synthetic_tasks/skill_based/easy/software_engineering/data_filtered.parquet",
+      "bytes": 103224442
+    }
+  ],
+  "requirements": [
+    "Verify independent task origin and source attribution",
+    "Audit real execution evidence and stateful terminal semantics",
+    "Exclude benchmark-derived material and later-phase target languages",
+    "Pin imported row IDs and all transformations",
+    "Do not execute external dataset code in native teacher runner"
+  ]
+}

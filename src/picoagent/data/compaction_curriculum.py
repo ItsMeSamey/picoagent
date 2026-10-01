@@ -1,4 +1,4 @@
-"""Original long-horizon curriculum for the shared half-context compactor.
+"""Original long-horizon curriculum for all shared context compaction modes.
 
 Task generation never executes commands or manufactures execution receipts. The
 stateless teacher receives exactly the model callback's messages and tool schemas;
@@ -14,6 +14,8 @@ from pathlib import Path
 import random
 import shlex
 from typing import Any, Callable
+
+from picoagent.harness.context import MANUAL_INSTRUCTION, conservative_token_count
 
 from .audit import audit_tasks, file_hash, verify_attempt, write_new_json
 from .generators import GENERATOR_VERSION, SYSTEM_PROMPT
@@ -195,6 +197,26 @@ class VisibleContextTeacher:
     """Same callback for actions and summaries; deliberately no constructor state."""
 
     def __call__(self, messages: list[dict], tools: list[dict]) -> dict:
+        if (not tools and len(messages) == 2 and
+                messages[0].get("content", "").startswith(MANUAL_INSTRUCTION)):
+            payload = json.loads(messages[1]["content"])
+            groups = payload["groups"]
+            # Preserve the latest complete observed action verbatim; summarize
+            # only earlier groups. This deterministic teacher is scaffolding,
+            # not evidence that a learned policy can choose good retention.
+            keep = ([groups[-1]["id"]] if len(groups) > 1 and
+                    groups[-1]["messages"][-1].get("role") == "tool" else [])
+            past = [message for group in groups if group["id"] not in keep
+                    for message in group["messages"]]
+            validate_messages(past)
+            memory = canonical_json(visible_memory(past))
+            retained = [message for group in groups if group["id"] in keep for message in group["messages"]]
+            if conservative_token_count([{"role": "user", "content": MEMORY_PREFIX + memory}] + retained) > payload["retained_context_budget"]:
+                keep = []
+                past = [message for group in groups for message in group["messages"]]
+                memory = canonical_json(visible_memory(past))
+            return {"role": "assistant", "content": canonical_json({
+                "keep_groups": keep, "summary": memory})}
         is_summary = (not tools and len(messages) == 2
                       and messages[0].get("role") == "system"
                       and messages[0].get("content", "").startswith(SUMMARY_PREFIX))
@@ -280,7 +302,7 @@ def audit_compaction_trace(trace: dict, *, token_counter: Callable | None = None
     validate_trace(trace)
     failures = []
     if trace["provenance"].get("curriculum_track") != TRACK:
-        failures.append("not a half-context curriculum trace")
+        failures.append("not a compaction curriculum trace")
     budget = trace["provenance"].get("context_budget") or {}
     limit = budget.get("max_tokens", 0) - budget.get("reserve_tokens", 0)
     accepted = [event for event in trace.get("model_events", [])
@@ -288,10 +310,16 @@ def audit_compaction_trace(trace: dict, *, token_counter: Callable | None = None
     if not accepted:
         failures.append("no accepted compaction; this attempt does not supervise summarization")
     for event in accepted:
-        if limit <= 0 or event["tokens_before"] <= limit:
+        mode = event.get("mode", "half")
+        default_headroom = limit // 2 if mode in {"full", "manual"} else 0
+        trigger = limit - budget.get("compaction_headroom_tokens", default_headroom)
+        if (limit <= 0 or not 0 < trigger <= limit or event["tokens_before"] <= trigger
+                or event.get("trigger_budget", trigger) != trigger):
             failures.append("compaction was not budget-triggered")
         try:
-            before = event["pinned_messages"] + event["source_messages"] + event["retained_messages"]
+            mode = event.get("mode", "half")
+            before = (event["pinned_messages"] + event["source_messages"] +
+                      (event["retained_messages"] if mode == "half" else []))
             pinned = 0
             while pinned < len(before) and before[pinned]["role"] == "system":
                 pinned += 1
@@ -303,7 +331,7 @@ def audit_compaction_trace(trace: dict, *, token_counter: Callable | None = None
                     boundaries.append(cursor)
             if len(event["pinned_messages"]) != pinned:
                 failures.append("compaction did not pin the entire system prefix")
-            if token_counter is not None:
+            if token_counter is not None and mode == "half":
                 pinned_tokens = token_counter(before[:pinned])
                 midpoint = max(0, token_counter(before) - pinned_tokens) / 2
                 distances = [(abs(max(0, token_counter(before[:pinned + boundary]) - pinned_tokens)
@@ -311,8 +339,8 @@ def audit_compaction_trace(trace: dict, *, token_counter: Callable | None = None
                 expected_split = pinned + min(distances)[1]
                 if event["split_index"] != expected_split:
                     failures.append("compaction did not replace the oldest token-half at a group boundary")
-            expected = visible_memory(event["source_messages"])
-            observed = json.loads(event["summary_response"]["content"])
+            expected = visible_memory(before)
+            observed = visible_memory(event["result_messages"])
             if observed != expected:
                 failures.append("summary omitted/altered observed essentials or added unsupported facts")
             if token_counter is not None:
@@ -335,7 +363,8 @@ def collect_compaction_task(task: dict, archive_root: str | Path, *, token_count
                             model: Callable | None = None, teacher_name: str | None = None,
                             image: str = "python:3.11-slim", runtime: str | None = None,
                             context_max_tokens: int = 4096, context_reserve_tokens: int = 512,
-                            include_test: bool = False) -> dict:
+                            include_test: bool = False, context_mode: str = "half",
+                            request_token_counter: Callable | None = None) -> dict:
     """Wrap the real collector, with no simulation/host/sandbox fallback.
 
     Supply the intended policy tokenizer including the ordinary tool schema cost.
@@ -357,7 +386,8 @@ def collect_compaction_task(task: dict, archive_root: str | Path, *, token_count
                           teacher_name=teacher_name or (TEACHER if model is None else "provided_model"),
                           image=image, runtime=runtime, max_steps=task["compaction"]["horizon"] + 1,
                           context_max_tokens=context_max_tokens,
-                          context_reserve_tokens=context_reserve_tokens, token_counter=token_counter)
+                          context_reserve_tokens=context_reserve_tokens, token_counter=token_counter,
+                          context_mode=context_mode, request_token_counter=request_token_counter)
     result["compaction_audit"] = audit_compaction_trace(result["trace"], token_counter=token_counter)
     return result
 

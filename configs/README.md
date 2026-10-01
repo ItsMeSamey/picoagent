@@ -120,3 +120,25 @@ labeled unexecuted `pipeline_smoke` fixtures, performs two optimizer steps and
 saves full checkpoints. These fixtures cannot enter production training. This
 checks machinery, not agent capability, pretrained-model quality, or benchmark
 performance. CPU interruption-and-resume was additionally tested after step one.
+
+## Native observed teacher data and mode qualification
+
+Reviewed deterministic teacher programs may use a separately sealed
+`picoagent.native_teacher.dataset.v1` snapshot. Set
+`allow_native_teacher_observed: true` explicitly in that run's config. The generic
+JSONL importer still rejects these records; the native verifier rechecks frozen
+sources, exact receipt bytes, model-visible contexts, fixture oracles and source
+reviews. Native evidence is never relabelled as container execution, and this
+exception does not permit model-generated learner commands on the host.
+
+Presets now use a **4096-token** sequence cap to accommodate complete compaction
+request/response examples (the current reference manual decisions reach 3510
+tokens). This is an input-admission limit, not a hardware-throughput claim. CUDA
+batches dynamically pad; XLA's fixed padding makes this setting costlier. Validate
+the whole selected dataset's actual token lengths on CPU before allocating a GPU
+or TPU. Do not silently truncate overlong examples to fit a cheaper setting.
+
+Development loss determines the trainer's retained `best` checkpoint for recovery.
+Final agent qualification is separate: run the paired full/half/manual dev suite
+and compare the weakest mode's family-balanced task success first. Do not describe
+a loss-selected checkpoint as an agentic winner before actual tool evaluation.

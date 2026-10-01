@@ -23,6 +23,8 @@ SOURCE_ROOTS = {"src", "scripts", "configs", "docs", "tests", "container", "data
 SOURCE_FILES = {"README.md", "LICENSE", "SECURITY.md", "pyproject.toml", "uv.lock", "requirements-cpu.lock.txt", "requirements-tpu.txt", ".gitignore", ".env.example"}
 EXCLUDED = {".git", ".venv", "venv", ".config", ".aws", ".ssh", ".codex", ".agents", ".colab-home", "__pycache__", ".pytest_cache", ".ruff_cache", "node_modules"}
 SECRET_NAME = re.compile(r"(^\.env($|\.)|credentials|oauth|(^|[-_])secrets?([_.-]|$)|(^|[-_])tokens?([_.-]|$)|\.pem$|\.key$)", re.I)
+PUBLIC_DATA_METADATA = {"tokenizer.json", "tokenizer_config.json", "special_tokens_map.json",
+                        "token_validation.json", "cli-10k-token-audit.json", "cli-10k-token-audit-source.py"}
 OUTPUT_SENTINEL = "PICOAGENT_RESULT="
 
 
@@ -34,13 +36,23 @@ def archive_source(root: Path, output: Path) -> dict:
     """
     root = root.resolve()
     files = []
+    # Honor repository exclusions (for example raw working copies already
+    # preserved in byte-exact bounded archives), including untracked but
+    # non-ignored source/data. Non-git fixture/source directories still work.
+    inventory = subprocess.run(["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+                               cwd=root, capture_output=True, text=True)
+    included = set(inventory.stdout.split("\0")) if inventory.returncode == 0 else None
     for path in sorted(root.rglob("*")):
         relative = path.relative_to(root)
+        if included is not None and relative.as_posix() not in included:
+            continue
         if any(part in EXCLUDED for part in relative.parts):
             continue
         if relative.parts[0] not in SOURCE_ROOTS and relative.as_posix() not in SOURCE_FILES:
             continue
-        if any(SECRET_NAME.search(part) for part in relative.parts) and relative.as_posix() != ".env.example":
+        public_metadata = relative.parts[0] == "data" and path.name in PUBLIC_DATA_METADATA
+        checked_parts = relative.parts[:-1] if public_metadata else relative.parts
+        if any(SECRET_NAME.search(part) for part in checked_parts) and relative.as_posix() != ".env.example":
             continue
         if path.is_symlink():
             raise ValueError(f"Refusing source symlink: {relative}")

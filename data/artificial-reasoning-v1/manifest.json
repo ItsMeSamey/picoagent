@@ -1,0 +1,73 @@
+{
+  "annotation_definition": "Invented compact action-plan summaries authored from each pre-action visible prefix and proposed next action; not private or recovered model reasoning.",
+  "annotation_order": "Each task processed in prefix order; the plan for each action was recorded before later prefixes for that task were opened.",
+  "artifact": "pilot.jsonl",
+  "artifact_sha256": "7f56790374cd673e13b6e4ebc57ebaccf56090942ed8c869bafab4d334e37984",
+  "author_model": null,
+  "author_model_status": "not_exposed_to_worker; not inferred",
+  "author_task_identity": "/root/research_alternate_training_compute",
+  "author_type": "native_assistant_synthetic_annotation",
+  "counts_by_family": {
+    "cli.csv_revenue_total": 1,
+    "cli.help_flag_lookup": 2,
+    "luna_recovery.cli_cut_bad_option": 5,
+    "luna_recovery.cli_sort_bad_option": 5,
+    "luna_recovery.file_missing_csv": 5
+  },
+  "counts_by_split": {
+    "dev": 7,
+    "train": 11
+  },
+  "created_at_utc": "2026-10-01T12:45:32.293672+00:00",
+  "immutability": "Created with exclusive-write mode; content frozen under recorded hashes. Do not overwrite or rebase; publish any revisions separately.",
+  "length_check": {
+    "exact_model_tokenizer_used": false,
+    "lexical_unit_count_definition": "Unicode word runs plus individual non-whitespace punctuation",
+    "maximum": 20,
+    "minimum": 7,
+    "target": "roughly 8–24 model tokens or shorter"
+  },
+  "parent_packet_hash_method": "sha256(raw_jsonl_line_without_newline)",
+  "performance_claims": null,
+  "provenance_caveats": [
+    "15 recovery annotations remain bound to pilot-20261001-003 and its recorded source hash. Parent reported a provenance issue. Do not rebase them onto corrected receipts or admit them to SFT.",
+    "3 CLI pilot_v3 annotations are diagnostic and require separate admission before training use.",
+    "All source splits are retained; this mixed-split pilot must not be treated as a training file."
+  ],
+  "row_count": 18,
+  "schema": "picoagent.artificial_action_plan_manifest.v1",
+  "source_files": [
+    {
+      "packet_count": 2,
+      "path": "data/luna-cli-v1/native_teacher_observed/pilot_v3/annotation_packets/dev.prefix_only_packets.jsonl",
+      "sha256": "c04053bf967b7dfb63b71a20795faecb2d54651eec14da63d28a84c6b685f874"
+    },
+    {
+      "packet_count": 1,
+      "path": "data/luna-cli-v1/native_teacher_observed/pilot_v3/annotation_packets/train.prefix_only_packets.jsonl",
+      "sha256": "1dc08b978da353ed184a7568e2f0c21f476695f0cbc59ee1de2633d29e792ec9"
+    },
+    {
+      "packet_count": 15,
+      "path": "data/luna-recovery-v1/native-batches/pilot-20261001-003/annotation_prefixes.jsonl",
+      "sha256": "c419990007d08cfafed170dcdc7b5045c94f6a118a329fd0eeed764c6e94c35b"
+    }
+  ],
+  "source_model_private_reasoning_used": false,
+  "source_traces_modified": false,
+  "status": "diagnostic_only_pending_separate_admission",
+  "task_or_oracle_or_underlying_source_files_opened": false,
+  "training_eligible": false,
+  "trajectory_tools_reexecuted": false,
+  "unique_task_count": 5,
+  "validation": {
+    "assistant_final_answers_absent": true,
+    "future_action_results_absent_by_order": true,
+    "packet_identity_and_file_hashes_preserved": true,
+    "prior_tool_calls_and_results_matched": true,
+    "proposed_current_action_result_absent": true,
+    "rows_checked": 18,
+    "scope": "Packet message structure only; source trace correctness and execution provenance were not independently verified.",
+    "successive_prefix_extension_consistent": true
+  }
+}

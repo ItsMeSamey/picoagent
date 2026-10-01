@@ -34,8 +34,9 @@ def run_training(config: TrainingConfig, *, resume_from_checkpoint: str | None =
     """
     if int(os.environ.get("WORLD_SIZE", "1")) != 1:
         raise ValueError("This audited baseline supports one process/device; distributed training requires a separately validated config")
-    manifest, rows = verify_dataset(config.dataset_manifest, allow_smoke=config.smoke_test)
-    if config.smoke_test != manifest["smoke_only"]:
+    manifest, rows = verify_dataset(config.dataset_manifest, allow_smoke=config.smoke_test,
+                                    allow_native_teacher=config.allow_native_teacher_observed)
+    if config.smoke_test != manifest.get("smoke_only", False):
         raise ValueError("smoke_test must exactly match the immutable dataset's smoke_only flag")
     output = Path(config.output_dir).resolve()
     if resume_from_checkpoint is None and output.exists() and any(output.iterdir()):
@@ -131,16 +132,22 @@ def run_training(config: TrainingConfig, *, resume_from_checkpoint: str | None =
         _snapshot_code(output, code)
         (output / "dataset_manifest.json").write_bytes(Path(config.dataset_manifest).read_bytes())
         dataset_snapshot = output / "dataset_snapshot"
-        dataset_snapshot.mkdir()
-        shutil.copyfile(config.dataset_manifest, dataset_snapshot / "manifest.json")
-        for split, entry in manifest["splits"].items():
-            source = Path(config.dataset_manifest).resolve().parent / entry["path"]
-            target = dataset_snapshot / entry["path"]
-            shutil.copyfile(source, target)
-            if sha256_file(target) != entry["sha256"]:
-                raise ValueError(f"Dataset changed while creating run snapshot: {split}")
-            os.chmod(target, 0o444)
-        os.chmod(dataset_snapshot / "manifest.json", 0o444)
+        if manifest["schema"] == "picoagent.native_teacher.dataset.v1":
+            from picoagent.data.native_admission import copy_native_snapshot
+            copied_manifest = copy_native_snapshot(config.dataset_manifest, dataset_snapshot)
+            if sha256_file(copied_manifest) != manifest_hash:
+                raise ValueError("Native evidence changed while creating run snapshot")
+        else:
+            dataset_snapshot.mkdir()
+            shutil.copyfile(config.dataset_manifest, dataset_snapshot / "manifest.json")
+            for split, entry in manifest["splits"].items():
+                source = Path(config.dataset_manifest).resolve().parent / entry["path"]
+                target = dataset_snapshot / entry["path"]
+                shutil.copyfile(source, target)
+                if sha256_file(target) != entry["sha256"]:
+                    raise ValueError(f"Dataset changed while creating run snapshot: {split}")
+                os.chmod(target, 0o444)
+            os.chmod(dataset_snapshot / "manifest.json", 0o444)
         tokenizer.save_pretrained(output / "tokenizer_snapshot")
         evidence = {
             "schema": "picoagent.training.run.v1", "created_at": now_utc(), "identity": identity, "original_config": config_payload,

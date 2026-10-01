@@ -97,8 +97,12 @@ python -m picoagent 'Use Python to compute and verify 173 * 289' \
 Add `--search-url http://127.0.0.1:8080/search` for a configured SearXNG endpoint.
 The sample SearXNG settings enable JSON; replace its local secret before serving.
 Each inference episode preserves its trace and uses a fresh KV file. Long
-conversations replace the oldest approximately half (at complete tool-group
-boundaries) with a model-generated summary and retain the newer suffix.
+conversations support `--compaction-mode full|half|manual`: summarize all history,
+replace the oldest token-half, or let the model select atomic groups to keep.
+System instructions remain pinned and original traces are preserved. See
+[mode contracts and qualification](docs/compaction_modes.md). For the 4K
+compaction curriculum, use `--max-new-tokens 768` to reserve structured-summary
+output space.
 
 ## Evaluation contract
 
@@ -107,6 +111,19 @@ of training and checkpoint selection. Score the trained policy's actual
 environment outcomes, not teacher answers. Publish failures, invalid tool calls,
 runtime/tool budgets, and multiple seeds; compare against a 1B baseline under
 the same harness and budgets. There is no guarantee this model will match it.
+
+Run paired internal dev evaluation of an actual checkpoint with:
+
+```bash
+python -m picoagent.evaluation --model runs/smol360m-full-v1/final-model \
+  --tasks data/compaction-v1/dev.tasks.jsonl --output runs/eval-dev-v1 \
+  --image picoagent-sandbox:v1 --runtime docker
+```
+
+This executes all three compaction modes in fresh workspaces. Reports expose
+per-mode and family-balanced scores; checkpoint qualification prioritizes the
+weakest mode, not an average that hides it. No such learned-model run has been
+completed yet.
 
 Documentation-only unfamiliar-language experiments come last. Invented languages
 and randomized APIs can establish novelty; C/JS/HTML cannot honestly be called

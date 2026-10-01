@@ -51,10 +51,11 @@ class UnexecutedFixtureRegistry:
 
 
 def unit_rollout(task, *, max_tokens=12000, teacher=None,
-                 token_counter=conservative_token_count, reserve_tokens=1000):
+                 token_counter=conservative_token_count, reserve_tokens=1000, mode="half", request_token_counter=None):
     teacher = teacher or VisibleContextTeacher()
     manager = ContextManager(teacher, max_tokens=max_tokens, reserve_tokens=reserve_tokens,
-                             token_counter=token_counter)
+                             token_counter=token_counter, mode=mode,
+                             request_token_counter=request_token_counter)
     harness = AgentHarness(teacher, UnexecutedFixtureRegistry(task), context=manager,
                            max_steps=task["compaction"]["horizon"] + 1,
                            system_prompt=SYSTEM_PROMPT)
@@ -66,7 +67,8 @@ def unit_rollout(task, *, max_tokens=12000, teacher=None,
                              if event["type"] in {"assistant", "compaction"}]
     trace["provenance"].update(
         execution="unexecuted", context_compaction_enabled=True,
-        context_budget={"max_tokens": max_tokens, "reserve_tokens": reserve_tokens},
+        context_budget={"max_tokens": max_tokens, "reserve_tokens": reserve_tokens,
+                        "compaction_headroom_tokens": manager.compaction_headroom_tokens},
         accepted_compactions=sum(event.get("type") == "compaction" and event["accepted"]
                                  for event in result.events))
     # Harness fixture events are deliberately not relabelled as execution evidence.
@@ -314,3 +316,37 @@ def test_pinned_tokenizer_4096_budget_with_unique_unexecuted_receipt_ids(family,
             assert pinned_smol_counter(event["input_messages"]) <= 4096 - 512
         else:
             assert "UNEXECUTED-CONTAINER-" not in event["summary_response"]["content"]
+
+
+@pytest.mark.parametrize("mode", ["full", "half", "manual"])
+@pytest.mark.parametrize("family", [family for family, split in SPLIT_POLICY.items() if split != "test"])
+def test_each_mode_retains_task_facts_and_supervises_compaction(mode, family):
+    task = generate_compaction_task(family, 12)
+    result, trace, manager = unit_rollout(task, mode=mode)
+    assert result.stop_reason == "final", result.error
+    assert check_task_result(task, result.final)["passed"]
+    assert len(manager.events) >= 2
+    validate_trace(trace)
+    report = audit_compaction_trace(trace, token_counter=conservative_token_count)
+    assert report["passed"], report
+    assert not report["eligible"]
+    assert all(event["mode"] == mode for event in manager.events)
+    if mode == "manual":
+        assert all(isinstance(event["keep_group_indices"], list) for event in manager.events)
+    assert len([row for row, _ in event_examples(trace) if row["tools"] == []]) == len(manager.events)
+
+
+@pytest.mark.parametrize("mode", ["full", "half", "manual"])
+def test_all_modes_fit_actual_compactor_context(mode, pinned_smol_counter):
+    # This counter includes tool schemas and is deliberately stricter than the
+    # actual tools-disabled summary counter. No model weights or tool execution.
+    task = generate_compaction_task("compaction.running_balance", 19)
+    result, trace, manager = unit_rollout(
+        task, mode=mode, max_tokens=4096, reserve_tokens=768,
+        token_counter=pinned_smol_counter, request_token_counter=pinned_smol_counter)
+    assert result.stop_reason == "final", result.error
+    assert check_task_result(task, result.final)["passed"]
+    assert audit_compaction_trace(trace, token_counter=pinned_smol_counter)["passed"]
+    for event in manager.events:
+        assert pinned_smol_counter(event["summary_request"]) <= 4096 - 768
+        assert pinned_smol_counter(event["summary_request"] + [event["summary_response"]]) <= 4096

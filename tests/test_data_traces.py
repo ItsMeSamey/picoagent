@@ -212,3 +212,60 @@ def test_compaction_replay_binds_summary_to_source_and_recent_suffix():
     corrupted["model_events"][2]["retained_messages"] = []
     with pytest.raises(DataValidationError, match="reconstruct"):
         _validate_model_event_replay(corrupted)
+
+
+@pytest.mark.parametrize("mode", ["full", "manual"])
+def test_full_and_manual_compaction_replay_preserves_exact_transition(mode):
+    from picoagent.data.schema import _validate_model_event_replay
+    from picoagent.harness.context import ContextManager
+    system = {"role": "system", "content": "Pinned test system"}
+    user = {"role": "user", "content": "Solve the original task and preserve tool facts. " * 60}
+    c1, c2 = tool_call("x1"), tool_call("x2")
+    r1 = {"role": "tool", "content": "old result", "tool_call_id": "x1"}
+    r2 = {"role": "tool", "content": "recent result", "tool_call_id": "x2"}
+    prefix = [system, user, c1, r1, c2, r2]
+    def summarizer(messages, tools):
+        text = canonical_json({"keep_groups": [2], "summary": "Solve the task; the first operation completed."}) if mode == "manual" else "Solve the task; both operations completed."
+        return {"role": "assistant", "content": text}
+    context = ContextManager(summarizer, max_tokens=8192, mode=mode)
+    compacted = context.compact(prefix, force=True)
+    final = {"role": "assistant", "content": "done"}
+    trace = {"messages": prefix + [final], "effective_messages": compacted.messages + [final],
+             "model_events": [{"type": "assistant", "input_messages": prefix[:2], "message": c1},
+                              {"type": "assistant", "input_messages": prefix[:4], "message": c2},
+                              compacted.event,
+                              {"type": "assistant", "input_messages": compacted.messages, "message": final}]}
+    _validate_model_event_replay(trace)
+    forged = copy.deepcopy(trace)
+    forged["model_events"][2]["before_messages"][-1]["content"] = "invented prior observation"
+    with pytest.raises(DataValidationError, match="before_messages"):
+        _validate_model_event_replay(forged)
+    forged = copy.deepcopy(trace)
+    forged["model_events"][2]["retained_messages"] = [r2]
+    with pytest.raises(DataValidationError, match="atomic|retain no"):
+        _validate_model_event_replay(forged)
+    if mode == "manual":
+        forged = copy.deepcopy(trace)
+        forged["model_events"][2]["keep_group_indices"] = [1]
+        with pytest.raises(DataValidationError, match="IDs differ"):
+            _validate_model_event_replay(forged)
+        forged = copy.deepcopy(trace)
+        forged["model_events"][2]["summary_request"][1]["content"] = canonical_json({"groups": [], "retained_context_budget": 7680})
+        with pytest.raises(DataValidationError, match="numbered groups"):
+            _validate_model_event_replay(forged)
+
+
+def test_legacy_half_compaction_replay_remains_valid():
+    from picoagent.data.schema import _validate_model_event_replay
+    from picoagent.harness.context import ContextManager
+    prefix = [{"role": "system", "content": "system"}, {"role": "user", "content": "Long earlier task " * 100},
+              tool_call("legacy"), {"role": "tool", "content": "result", "tool_call_id": "legacy"}]
+    context = ContextManager(lambda messages, tools: {"role": "assistant", "content": "Keep solving."}, max_tokens=8192)
+    result = context.compact(prefix, force=True)
+    for field in ("mode", "before_messages", "keep_group_indices", "retained_context_budget", "trigger_budget"):
+        result.event.pop(field, None)
+    final = {"role": "assistant", "content": "done"}
+    trace = {"messages": prefix + [final], "effective_messages": result.messages + [final],
+             "model_events": [{"type": "assistant", "input_messages": prefix[:2], "message": prefix[2]},
+                              result.event, {"type": "assistant", "input_messages": result.messages, "message": final}]}
+    _validate_model_event_replay(trace)

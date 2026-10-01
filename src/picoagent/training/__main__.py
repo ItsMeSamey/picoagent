@@ -18,6 +18,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     prepare.add_argument("--output-dir", required=True)
     validate = commands.add_parser("validate", help="Recheck hashes, admission and split separation without ML dependencies")
     validate.add_argument("--manifest", required=True)
+    validate.add_argument("--allow-native-teacher-observed", action="store_true",
+                          help="Explicitly allow audited native teacher snapshots; not arbitrary native execution")
     train = commands.add_parser("train", help="Run full SFT or distinctly labeled QLoRA on your already configured machine")
     train.add_argument("--config", required=True)
     train.add_argument("--resume", default=None, help="Verified checkpoint in the original run directory; immutable config must match")
@@ -28,7 +30,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "prepare":
         result = {"manifest": str(prepare_dataset(args.train, args.dev, args.output_dir))}
     elif args.command == "validate":
-        manifest, rows = verify_dataset(args.manifest)
+        manifest, rows = verify_dataset(args.manifest,
+                                         allow_native_teacher=args.allow_native_teacher_observed)
         result = {"verified": True, "records": {split: len(records) for split, records in rows.items()}, "lockbox_used": False}
     elif args.command == "train":
         from .train import run_training
