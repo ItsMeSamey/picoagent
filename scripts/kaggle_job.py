@@ -9,11 +9,14 @@ from __future__ import annotations
 import argparse
 import base64
 import hashlib
+import inspect
 import json
 import os
+import pathlib
 from pathlib import Path
 import re
 import shutil
+import sys
 import tempfile
 from typing import Any
 
@@ -116,6 +119,441 @@ def _validate_native_sft_inputs(root: Path, config: str, dataset_manifest: str |
     return config_path, config_relative, manifest_relative, manifest_value
 
 
+def _safe_tree_no_symlinks(root: Path) -> None:
+    if root.is_symlink() or not root.is_dir():
+        raise ValueError("Resume source must be a real directory, not a symlink")
+    for path in root.rglob("*"):
+        if path.is_symlink():
+            raise ValueError("Resume source contains a symlink")
+
+
+def _safe_path_no_symlink_components(path: Path) -> Path:
+    candidate = path.absolute()
+    current = Path(candidate.anchor)
+    for part in candidate.parts[1:]:
+        current = current / part
+        if current.is_symlink():
+            raise ValueError("Resume path traverses a symlink")
+    return candidate
+
+
+def _code_tree_sha256(root: Path) -> str:
+    """Match training.provenance.code_evidence() for a supplied source tree."""
+    files: dict[str, str] = {}
+    package = root / "src/picoagent"
+    for path in sorted(package.rglob("*.py")):
+        if path.is_file():
+            files[path.relative_to(root).as_posix()] = _sha256_file(path)
+    project_file = root / "pyproject.toml"
+    if project_file.is_file():
+        files[project_file.relative_to(root).as_posix()] = _sha256_file(project_file)
+    for path in sorted((root / "configs").glob("*.json")):
+        if path.is_file():
+            files[path.relative_to(root).as_posix()] = _sha256_file(path)
+    canonical = json.dumps(files, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    return _sha256_bytes(canonical.encode("utf-8"))
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def _verify_resume_inventory(directory: Path, expected: dict[str, Any], label: str) -> int:
+    _safe_tree_no_symlinks(directory)
+    normalized: dict[str, str] = {}
+    for relative, record in expected.items():
+        posix = pathlib.PurePosixPath(relative) if isinstance(relative, str) else None
+        digest = record.get("sha256") if isinstance(record, dict) else record
+        if (posix is None or posix.is_absolute() or "\\" in relative
+                or any(part in {"", ".", ".."} for part in relative.split("/"))
+                or not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest)):
+            raise ValueError(f"{label} inventory has unsafe paths or hashes")
+        normalized[relative] = digest
+    actual = {path.relative_to(directory).as_posix() for path in directory.rglob("*") if path.is_file()}
+    if actual != set(normalized):
+        raise ValueError(f"{label} evidence tree has missing or unexpected files")
+    total = 0
+    for relative, digest in normalized.items():
+        path = directory / relative
+        if not path.resolve(strict=True).is_relative_to(directory.resolve(strict=True)) or _sha256_file(path) != digest:
+            raise ValueError(f"{label} evidence file changed: {relative}")
+        total += path.stat().st_size
+    return total
+
+
+def _validate_resume_artifact(root: Path, config: str, manifest_relative: str, *,
+                              run_dir: Path, checkpoint_name: str,
+                              run_manifest_sha256: str,
+                              checkpoint_manifest_sha256: str) -> dict[str, Any]:
+    if not re.fullmatch(r"checkpoint-[1-9][0-9]*", checkpoint_name):
+        raise ValueError("Resume checkpoint must use a positive checkpoint-N name")
+    for value, label in ((run_manifest_sha256, "run manifest"),
+                         (checkpoint_manifest_sha256, "checkpoint manifest")):
+        if not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value):
+            raise ValueError(f"Caller must supply an exact lowercase SHA256 for the {label}")
+    run_dir = _safe_path_no_symlink_components(run_dir).resolve(strict=True)
+    _safe_tree_no_symlinks(run_dir)
+    run_manifest_path = run_dir / "run_manifest.json"
+    status_path = run_dir / "run_status.json"
+    dataset_manifest_path = run_dir / "dataset_manifest.json"
+    checkpoint = run_dir / checkpoint_name
+    checkpoint_manifest_path = checkpoint / "checkpoint_manifest.json"
+    for path in (run_manifest_path, status_path, dataset_manifest_path, checkpoint_manifest_path):
+        if path.is_symlink() or not path.is_file() or not path.resolve(strict=True).is_relative_to(run_dir):
+            raise ValueError(f"Missing or unsafe resume artifact: {path.name}")
+    if _sha256_file(run_manifest_path) != run_manifest_sha256:
+        raise ValueError("Caller-supplied run-manifest SHA256 does not match retrieved output")
+    if _sha256_file(checkpoint_manifest_path) != checkpoint_manifest_sha256:
+        raise ValueError("Caller-supplied checkpoint-manifest SHA256 does not match retrieved output")
+
+    run_manifest = json.loads(run_manifest_path.read_text(encoding="utf-8"))
+    run_status = json.loads(status_path.read_text(encoding="utf-8"))
+    if run_manifest.get("schema") != "picoagent.training.run.v1":
+        raise ValueError("Resume run manifest has an unsupported schema")
+    if run_status.get("status") != "paused":
+        raise ValueError("Resume source must be paused, not running, failed, or completed")
+    checkpoint_step = int(checkpoint_name.split("-")[1])
+    if run_status.get("checkpoint") != checkpoint_name or run_status.get("global_step") != checkpoint_step:
+        raise ValueError("Paused run status does not identify the selected checkpoint step")
+    planned_steps = run_status.get("planned_global_steps")
+    if type(planned_steps) is not int or planned_steps <= checkpoint_step:
+        raise ValueError("Paused run status must show that the original schedule is incomplete")
+    if run_status.get("run_manifest_sha256") != run_manifest_sha256:
+        raise ValueError("Paused run status is not bound to the pinned run manifest")
+    if run_status.get("checkpoint_manifest_sha256") != checkpoint_manifest_sha256:
+        raise ValueError("Paused run status is not bound to the pinned checkpoint manifest")
+    if any((run_dir / name).exists() for name in ("final-model", "final-adapter", "final_artifacts.json")):
+        raise ValueError("Completed final artifacts cannot be used as a paused segment")
+
+    numeric_checkpoints = []
+    for path in run_dir.iterdir():
+        match = re.fullmatch(r"checkpoint-([0-9]+)", path.name)
+        if match:
+            if path.is_symlink() or not path.is_dir():
+                raise ValueError("Resume run contains an unsafe checkpoint path")
+            numeric_checkpoints.append(int(match.group(1)))
+    if not numeric_checkpoints or max(numeric_checkpoints) != checkpoint_step:
+        raise ValueError("Selected checkpoint must be the latest checkpoint; unexpected newer state exists")
+
+    current_dataset_sha = _sha256_file(root / manifest_relative)
+    if _sha256_file(dataset_manifest_path) != current_dataset_sha:
+        raise ValueError("Retrieved run's immutable dataset manifest differs from the current pinned input")
+    identity = run_manifest.get("identity")
+    if not isinstance(identity, dict) or identity.get("dataset_manifest_sha256") != current_dataset_sha:
+        raise ValueError("Run identity is bound to a different dataset manifest")
+    if identity.get("source_tree_sha256") != _code_tree_sha256(root):
+        raise ValueError("Run identity is bound to different source code/configuration")
+
+    src = str(root / "src")
+    if src not in sys.path:
+        sys.path.insert(0, src)
+    from picoagent.training.config import TrainingConfig
+
+    effective_config = TrainingConfig.load(root / config).as_dict()
+    effective_config["output_dir"] = "/kaggle/working/picoagent-training"
+    effective_config["dataset_manifest"] = f"/kaggle/temp/picoagent/{manifest_relative}"
+    effective_config["device"] = "cuda"
+    expected_config_identity = {key: value for key, value in effective_config.items()
+                                if key not in {"output_dir", "dataset_manifest"}}
+    original_config = run_manifest.get("original_config")
+    original_config_identity = ({key: value for key, value in original_config.items()
+                                 if key not in {"output_dir", "dataset_manifest"}}
+                                if isinstance(original_config, dict) else None)
+    if (original_config_identity != expected_config_identity
+            or identity.get("config") != expected_config_identity):
+        raise ValueError("Resume config differs from the original immutable training schedule")
+
+    code_files = run_manifest.get("code", {}).get("files")
+    tokenizer_files = run_manifest.get("tokenizer_files")
+    if not isinstance(code_files, dict) or not code_files or not isinstance(tokenizer_files, dict) or not tokenizer_files:
+        raise ValueError("Run manifest lacks immutable source/tokenizer snapshot inventories")
+    snapshot_bytes = 0
+    snapshot_bytes += _verify_resume_inventory(run_dir / "source_snapshot", code_files, "source")
+    snapshot_bytes += _verify_resume_inventory(run_dir / "tokenizer_snapshot", tokenizer_files, "tokenizer")
+    dataset_manifest_value = json.loads(dataset_manifest_path.read_text(encoding="utf-8"))
+    if run_manifest.get("dataset") != dataset_manifest_value:
+        raise ValueError("Run manifest dataset metadata differs from the frozen dataset manifest")
+    dataset_files = dataset_manifest_value.get("files")
+    if isinstance(dataset_files, dict):
+        dataset_inventory = {name: info for name, info in dataset_files.items()}
+    else:
+        splits = dataset_manifest_value.get("splits")
+        if not isinstance(splits, dict) or not splits:
+            raise ValueError("Frozen dataset manifest has no verifiable file inventory")
+        dataset_inventory = {entry["path"]: {"sha256": entry["sha256"]} for entry in splits.values()}
+    dataset_inventory["manifest.json"] = {"sha256": current_dataset_sha}
+    snapshot_bytes += _verify_resume_inventory(run_dir / "dataset_snapshot", dataset_inventory, "dataset")
+
+    checkpoint_manifest = json.loads(checkpoint_manifest_path.read_text(encoding="utf-8"))
+    if (checkpoint_manifest.get("schema") != "picoagent.checkpoint.v1"
+            or checkpoint_manifest.get("run_manifest_sha256") != run_manifest_sha256
+            or not isinstance(checkpoint_manifest.get("files"), dict)):
+        raise ValueError("Checkpoint manifest is invalid or belongs to another run")
+    expected_files = checkpoint_manifest["files"]
+    actual_files: set[str] = set()
+    for path in checkpoint.rglob("*"):
+        if path.is_symlink():
+            raise ValueError("Checkpoint contains a symlink")
+        relative = path.relative_to(checkpoint).as_posix()
+        if path.is_file() and relative != "checkpoint_manifest.json":
+            actual_files.add(relative)
+    if actual_files != set(expected_files):
+        raise ValueError("Checkpoint has missing or unexpected files")
+    for relative, digest in expected_files.items():
+        if (not isinstance(relative, str) or "\\" in relative
+                or Path(relative).is_absolute() or any(part in {"", ".", ".."} for part in relative.split("/"))
+                or not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest)):
+            raise ValueError("Checkpoint manifest contains an unsafe path or hash")
+        file_path = checkpoint / relative
+        if not file_path.resolve(strict=True).is_relative_to(checkpoint.resolve(strict=True)) or _sha256_file(file_path) != digest:
+            raise ValueError("Checkpoint file failed hash/path verification")
+    for required in ("trainer_state.json", "optimizer.pt", "scheduler.pt"):
+        if required not in expected_files:
+            raise ValueError(f"Full resume checkpoint is missing {required}")
+    if not any(name in expected_files for name in ("model.safetensors", "pytorch_model.bin",
+                                                    "adapter_model.safetensors", "adapter_model.bin")):
+        raise ValueError("Full resume checkpoint is missing model/adapter weights")
+    if not any(name.startswith("rng_state") and name.endswith(".pth") for name in expected_files):
+        raise ValueError("Full resume checkpoint is missing RNG state")
+    trainer_state = json.loads((checkpoint / "trainer_state.json").read_text(encoding="utf-8"))
+    if trainer_state.get("global_step") != checkpoint_step or trainer_state.get("max_steps") != planned_steps:
+        raise ValueError("Checkpoint trainer state does not match paused run schedule/status")
+
+    return {
+        "kernel_source": None,
+        "run_manifest_sha256": run_manifest_sha256,
+        "run_status_sha256": _sha256_file(status_path),
+        "dataset_manifest_sha256": current_dataset_sha,
+        "checkpoint": checkpoint_name,
+        "checkpoint_manifest_sha256": checkpoint_manifest_sha256,
+        "global_step": checkpoint_step,
+        "planned_global_steps": planned_steps,
+        "checkpoint_bytes": sum((checkpoint / name).stat().st_size for name in expected_files),
+        "snapshot_bytes": snapshot_bytes,
+    }
+
+
+def _restore_resume_tree(input_root, output_dir, pins):
+    """Verify a mounted prior kernel output and copy only its latest resumable state."""
+    input_root = pathlib.Path(input_root).absolute()
+    output_dir = pathlib.Path(output_dir).absolute()
+    input_component = pathlib.Path(input_root.anchor)
+    for part in input_root.parts[1:]:
+        input_component = input_component / part
+        if input_component.is_symlink():
+            raise ValueError("Mounted kernel-source input traverses a symlink")
+    if not input_root.is_dir():
+        raise ValueError("Mounted kernel-source input is missing or unsafe")
+    if output_dir.exists() or output_dir.is_symlink():
+        raise ValueError("Resume destination must be a new output run directory")
+    current = pathlib.Path(output_dir.anchor)
+    for part in output_dir.parts[1:]:
+        current = current / part
+        if current.is_symlink():
+            raise ValueError("Resume destination traverses a symlink")
+
+    def file_hash(path):
+        digest = hashlib.sha256()
+        with pathlib.Path(path).open("rb") as stream:
+            for block in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(block)
+        return digest.hexdigest()
+
+    def reject_symlinks(root):
+        root = pathlib.Path(root)
+        if root.is_symlink() or not root.is_dir():
+            raise ValueError("Prior run directory is missing or unsafe")
+        for path in root.rglob("*"):
+            if path.is_symlink():
+                raise ValueError("Prior run output contains a symlink")
+
+    run_dirs = []
+    for candidate in input_root.rglob("run_manifest.json"):
+        if candidate.is_symlink() or not candidate.is_file():
+            continue
+        if not candidate.resolve(strict=True).is_relative_to(input_root.resolve(strict=True)):
+            raise ValueError("Mounted run manifest escapes the kernel-source input")
+        if file_hash(candidate) == pins["run_manifest_sha256"]:
+            run_dirs.append(candidate.parent)
+    if len(run_dirs) != 1:
+        raise ValueError("Expected exactly one mounted prior run matching the pinned run-manifest hash")
+    run_dir = run_dirs[0]
+    reject_symlinks(run_dir)
+    if (run_dir == output_dir or run_dir.is_relative_to(output_dir)
+            or output_dir.is_relative_to(run_dir)):
+        raise ValueError("Resume destination must be separate from immutable prior output")
+
+    run_manifest_path = run_dir / "run_manifest.json"
+    status_path = run_dir / "run_status.json"
+    dataset_manifest_path = run_dir / "dataset_manifest.json"
+    checkpoint_name = pins["checkpoint"]
+    if not re.fullmatch(r"checkpoint-[1-9][0-9]*", checkpoint_name):
+        raise ValueError("Pinned resume checkpoint name is invalid")
+    checkpoint_step = int(checkpoint_name.split("-")[1])
+    checkpoint = run_dir / checkpoint_name
+    checkpoint_manifest_path = checkpoint / "checkpoint_manifest.json"
+    for path in (status_path, dataset_manifest_path, checkpoint_manifest_path):
+        if not path.is_file() or not path.resolve(strict=True).is_relative_to(run_dir.resolve(strict=True)):
+            raise ValueError(f"Prior run is missing or escaping required artifact {path.name}")
+    if file_hash(run_manifest_path) != pins["run_manifest_sha256"]:
+        raise ValueError("Prior run manifest changed after source selection")
+    if file_hash(status_path) != pins["run_status_sha256"]:
+        raise ValueError("Prior run status changed after source selection")
+    if file_hash(dataset_manifest_path) != pins["dataset_manifest_sha256"]:
+        raise ValueError("Prior immutable dataset manifest changed after source selection")
+    if file_hash(checkpoint_manifest_path) != pins["checkpoint_manifest_sha256"]:
+        raise ValueError("Prior checkpoint manifest changed after source selection")
+
+    run_manifest = json.loads(run_manifest_path.read_text(encoding="utf-8"))
+    status = json.loads(status_path.read_text(encoding="utf-8"))
+    if run_manifest.get("schema") != "picoagent.training.run.v1":
+        raise ValueError("Prior run manifest schema is unsupported")
+    if (status.get("status") != "paused" or status.get("checkpoint") != checkpoint_name
+            or status.get("global_step") != checkpoint_step
+            or status.get("planned_global_steps") != pins["planned_global_steps"]
+            or status.get("global_step") >= status.get("planned_global_steps", 0)
+            or status.get("run_manifest_sha256") != pins["run_manifest_sha256"]
+            or status.get("checkpoint_manifest_sha256") != pins["checkpoint_manifest_sha256"]):
+        raise ValueError("Prior run is not in the exact pinned, incomplete paused state")
+    if any((run_dir / name).exists() for name in ("final-model", "final-adapter", "final_artifacts.json")):
+        raise ValueError("Completed/finalized run cannot be restored as an incomplete segment")
+
+    def verify_inventory(directory, expected, label):
+        directory = pathlib.Path(directory)
+        reject_symlinks(directory)
+        normalized = {}
+        for relative, record in expected.items():
+            posix = pathlib.PurePosixPath(relative) if isinstance(relative, str) else None
+            digest = record.get("sha256") if isinstance(record, dict) else record
+            if (posix is None or posix.is_absolute() or "\\" in relative
+                    or any(part in {"", ".", ".."} for part in relative.split("/"))
+                    or not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest)):
+                raise ValueError(label + " inventory has unsafe paths or hashes")
+            normalized[relative] = digest
+        actual = {path.relative_to(directory).as_posix() for path in directory.rglob("*") if path.is_file()}
+        if actual != set(normalized):
+            raise ValueError(label + " evidence tree has missing or unexpected files")
+        total = 0
+        for relative, digest in normalized.items():
+            item = directory / relative
+            if not item.resolve(strict=True).is_relative_to(directory.resolve(strict=True)) or file_hash(item) != digest:
+                raise ValueError(label + " evidence file changed: " + relative)
+            total += item.stat().st_size
+        return total
+
+    code_files = run_manifest.get("code", {}).get("files")
+    tokenizer_files = run_manifest.get("tokenizer_files")
+    if not isinstance(code_files, dict) or not code_files or not isinstance(tokenizer_files, dict) or not tokenizer_files:
+        raise ValueError("Prior run lacks source/tokenizer snapshot inventories")
+    snapshot_bytes = verify_inventory(run_dir / "source_snapshot", code_files, "source")
+    snapshot_bytes += verify_inventory(run_dir / "tokenizer_snapshot", tokenizer_files, "tokenizer")
+    dataset_manifest = json.loads(dataset_manifest_path.read_text(encoding="utf-8"))
+    if run_manifest.get("dataset") != dataset_manifest:
+        raise ValueError("Prior run dataset metadata differs from its frozen dataset manifest")
+    dataset_files = dataset_manifest.get("files")
+    if isinstance(dataset_files, dict):
+        dataset_inventory = dict(dataset_files)
+    else:
+        splits = dataset_manifest.get("splits")
+        if not isinstance(splits, dict) or not splits:
+            raise ValueError("Prior dataset manifest has no verifiable file inventory")
+        dataset_inventory = {entry["path"]: {"sha256": entry["sha256"]} for entry in splits.values()}
+    dataset_inventory["manifest.json"] = {"sha256": pins["dataset_manifest_sha256"]}
+    snapshot_bytes += verify_inventory(run_dir / "dataset_snapshot", dataset_inventory, "dataset")
+
+    checkpoint_steps = []
+    for path in run_dir.iterdir():
+        match = re.fullmatch(r"checkpoint-([0-9]+)", path.name)
+        if match:
+            if path.is_symlink() or not path.is_dir():
+                raise ValueError("Prior run contains an unsafe checkpoint path")
+            checkpoint_steps.append(int(match.group(1)))
+    if not checkpoint_steps or max(checkpoint_steps) != checkpoint_step:
+        raise ValueError("Prior run contains an unexpected newer checkpoint")
+
+    checkpoint_manifest = json.loads(checkpoint_manifest_path.read_text(encoding="utf-8"))
+    if (checkpoint_manifest.get("schema") != "picoagent.checkpoint.v1"
+            or checkpoint_manifest.get("run_manifest_sha256") != pins["run_manifest_sha256"]
+            or not isinstance(checkpoint_manifest.get("files"), dict)):
+        raise ValueError("Prior checkpoint manifest is invalid or belongs to another run")
+    expected_files = checkpoint_manifest["files"]
+    actual_files = set()
+    for path in checkpoint.rglob("*"):
+        if path.is_symlink():
+            raise ValueError("Prior checkpoint contains a symlink")
+        relative = path.relative_to(checkpoint).as_posix()
+        if path.is_file() and relative != "checkpoint_manifest.json":
+            actual_files.add(relative)
+    if actual_files != set(expected_files):
+        raise ValueError("Prior checkpoint has missing or unexpected files")
+    for relative, expected_hash in expected_files.items():
+        if (not isinstance(relative, str) or "\\" in relative or pathlib.PurePosixPath(relative).is_absolute()
+                or any(part in {"", ".", ".."} for part in relative.split("/"))
+                or not isinstance(expected_hash, str) or not re.fullmatch(r"[0-9a-f]{64}", expected_hash)):
+            raise ValueError("Checkpoint manifest contains an unsafe path/hash")
+        source = checkpoint / relative
+        if not source.resolve(strict=True).is_relative_to(checkpoint.resolve(strict=True)) or file_hash(source) != expected_hash:
+            raise ValueError("Prior checkpoint file failed hash/path verification")
+    for required in ("trainer_state.json", "optimizer.pt", "scheduler.pt"):
+        if required not in expected_files:
+            raise ValueError(f"Prior full checkpoint is missing {required}")
+    if not any(name in expected_files for name in ("model.safetensors", "pytorch_model.bin",
+                                                    "adapter_model.safetensors", "adapter_model.bin")):
+        raise ValueError("Prior checkpoint is missing model/adapter weights")
+    if not any(name.startswith("rng_state") and name.endswith(".pth") for name in expected_files):
+        raise ValueError("Prior checkpoint is missing RNG state")
+    state = json.loads((checkpoint / "trainer_state.json").read_text(encoding="utf-8"))
+    if state.get("global_step") != checkpoint_step or state.get("max_steps") != pins["planned_global_steps"]:
+        raise ValueError("Prior checkpoint trainer state differs from the paused schedule")
+
+    restore_bytes = (run_manifest_path.stat().st_size + dataset_manifest_path.stat().st_size
+                     + status_path.stat().st_size + checkpoint_manifest_path.stat().st_size
+                     + sum((checkpoint / name).stat().st_size for name in expected_files) + snapshot_bytes)
+    working_root = output_dir.parent
+    budget = pins.get("output_budget_bytes", 20_000_000_000)
+    existing_working_bytes = 0
+    for path in working_root.rglob("*"):
+        if path.is_symlink():
+            raise ValueError("Output working tree contains a symlink before resume staging")
+        if path.is_file():
+            existing_working_bytes += path.stat().st_size
+    if existing_working_bytes + restore_bytes > budget:
+        raise OSError("Restored evidence/checkpoint would exceed the bounded Kaggle output budget")
+    if shutil.disk_usage(working_root).free < restore_bytes:
+        raise OSError("Insufficient free space to restore prior run evidence and checkpoint")
+    output_dir.mkdir(parents=True, exist_ok=False)
+    shutil.copyfile(run_manifest_path, output_dir / "run_manifest.json")
+    shutil.copyfile(dataset_manifest_path, output_dir / "dataset_manifest.json")
+    shutil.copyfile(status_path, output_dir / "run_status.json")
+    shutil.copytree(run_dir / "source_snapshot", output_dir / "source_snapshot")
+    shutil.copytree(run_dir / "tokenizer_snapshot", output_dir / "tokenizer_snapshot")
+    shutil.copytree(run_dir / "dataset_snapshot", output_dir / "dataset_snapshot")
+    shutil.copytree(checkpoint, output_dir / checkpoint_name)
+    staged_checkpoint = output_dir / checkpoint_name
+    if file_hash(output_dir / "run_manifest.json") != pins["run_manifest_sha256"]:
+        raise ValueError("Staged run manifest failed pinned-hash verification")
+    if file_hash(output_dir / "dataset_manifest.json") != pins["dataset_manifest_sha256"]:
+        raise ValueError("Staged dataset manifest failed pinned-hash verification")
+    if file_hash(output_dir / "run_status.json") != pins["run_status_sha256"]:
+        raise ValueError("Staged paused status failed pinned-hash verification")
+    if file_hash(staged_checkpoint / "checkpoint_manifest.json") != pins["checkpoint_manifest_sha256"]:
+        raise ValueError("Staged checkpoint manifest failed pinned-hash verification")
+    verify_inventory(output_dir / "source_snapshot", code_files, "staged source")
+    verify_inventory(output_dir / "tokenizer_snapshot", tokenizer_files, "staged tokenizer")
+    verify_inventory(output_dir / "dataset_snapshot", dataset_inventory, "staged dataset")
+    for relative, expected_hash in expected_files.items():
+        if file_hash(staged_checkpoint / relative) != expected_hash:
+            raise ValueError("Staged checkpoint file failed hash verification: " + relative)
+    staged_names = {path.name for path in output_dir.glob("checkpoint-*") if path.is_dir()}
+    if staged_names != {checkpoint_name}:
+        raise ValueError("Resume staging copied an unexpected checkpoint")
+    return str(staged_checkpoint)
+
+
 def _dataset_metadata(handle: str, slug: str, license_name: str, license_description: str | None) -> dict[str, Any]:
     if license_name not in SUPPORTED_DATASET_LICENSES:
         raise ValueError("Dataset license must be explicitly set to unknown, copyright-authors, or other")
@@ -142,7 +580,7 @@ def _source_staging_bootstrap() -> tuple[str, str]:
 def _base_program_prefix(helper: str, helper_sha256: str) -> str:
     return f'''#!/usr/bin/env python3
 """Generated Kaggle runner. It stages verified source before training."""
-import hashlib, json, os, pathlib, signal, subprocess, sys, tarfile, tempfile, time
+import hashlib, json, os, pathlib, re, shutil, signal, subprocess, sys, tarfile, tempfile, time
 EXPECTED_STAGING_HELPER_SHA256 = {helper_sha256!r}
 STAGING_HELPER_TEXT = {helper!r}
 if hashlib.sha256(STAGING_HELPER_TEXT.encode("utf-8")).hexdigest() != EXPECTED_STAGING_HELPER_SHA256:
@@ -257,8 +695,28 @@ if result.returncode:
 '''
 
 
+def _resume_restore_snippet(resume: dict[str, Any] | None) -> str:
+    if resume is None:
+        return ""
+    function_source = inspect.getsource(_restore_resume_tree)
+    pins = {key: resume[key] for key in (
+        "run_manifest_sha256", "run_status_sha256", "dataset_manifest_sha256",
+        "checkpoint", "checkpoint_manifest_sha256", "global_step", "planned_global_steps",
+    )}
+    pins["output_budget_bytes"] = resume["output_budget_bytes"]
+    return f'''\n# Restore only the one locally verified prior checkpoint. The source handle is
+# attached in kernel_sources; all bytes are checked against caller-pinned hashes.
+_restore_resume_source = {function_source!r}
+exec(compile(_restore_resume_source, "<pinned-resume-restore>", "exec"), globals())
+_resume_pins = {pins!r}
+resume_checkpoint_path = _restore_resume_tree(
+    pathlib.Path("/kaggle/input"), pathlib.Path("/kaggle/working/picoagent-training"), _resume_pins)
+'''
+
+
 def _private_source_program(config: str, transfer_manifest: dict[str, Any], manifest_bytes: bytes,
-                            helper: str, helper_sha256: str, *, segment_steps: int) -> str:
+                            helper: str, helper_sha256: str, *, segment_steps: int,
+                            resume: dict[str, Any] | None = None) -> str:
     _validate_handle(transfer_manifest["dataset_handle"])
     manifest_sha = _sha256_bytes(manifest_bytes)
     expected_json = json.dumps(transfer_manifest, sort_keys=True, indent=2) + "\n"
@@ -325,10 +783,15 @@ stage_result = extract_source_archive(archive_path, str(project), bundle)
 if stage_result.get("verified") is not True:
     raise RuntimeError("Source staging did not verify extracted files")
 '''
-    return prefix + _training_tail(config, segment_steps)
+    return prefix + _resume_restore_snippet(resume) + _training_tail(
+        config, segment_steps, resume_checkpoint=resume["checkpoint"] if resume else None)
 
 
-def _training_tail(config: str, segment_steps: int) -> str:
+def _training_tail(config: str, segment_steps: int, *, resume_checkpoint: str | None = None) -> str:
+    resume_argument = (
+        f', "--resume", str(pathlib.Path(training_config["output_dir"]) / {resume_checkpoint!r})'
+        if resume_checkpoint else ""
+    )
     return f'''\nsubprocess.run([sys.executable, "-m", "pip", "install", "--quiet", {PINNED_PACKAGES[0]!r}, {PINNED_PACKAGES[1]!r}, {PINNED_PACKAGES[2]!r}], check=True)
 import torch
 hardware = {{"torch": torch.__version__, "cuda": torch.cuda.is_available(), "devices": torch.cuda.device_count(), "gpu": torch.cuda.get_device_name(0) if torch.cuda.is_available() else None}}
@@ -347,7 +810,7 @@ freeze = subprocess.run([sys.executable, "-m", "pip", "freeze"], capture_output=
 (output / "environment.txt").write_text(freeze.stdout)
 command = [sys.executable, "-m", "picoagent.training", "train", "--config", str(resolved_config),
            "--segment-steps", {str(segment_steps)!r}, "--output-budget-bytes", {str(KAGGLE_OUTPUT_BUDGET_BYTES)!r},
-           "--output-budget-root", "/kaggle/working"]
+           "--output-budget-root", "/kaggle/working"{resume_argument}]
 with (output / "training.log").open("w") as log:
     result = subprocess.run(command, cwd=project, stdout=log, stderr=subprocess.STDOUT, check=False)
 print((output / "training.log").read_text()[-12000:], flush=True)
@@ -369,14 +832,15 @@ if result.returncode:
 '''
 
 
-def _kernel_metadata(owner: str, slug: str, dataset_source: str | None) -> dict[str, Any]:
+def _kernel_metadata(owner: str, slug: str, dataset_source: str | None,
+                     kernel_sources: list[str] | None = None) -> dict[str, Any]:
     return {
         "id": f"{owner}/{slug}", "title": slug.replace("-", " "),
         "code_file": "main.py", "language": "python", "kernel_type": "script",
         "is_private": True, "enable_gpu": True, "enable_internet": True,
         "machine_shape": KAGGLE_ACCELERATOR,
         "dataset_sources": [dataset_source] if dataset_source else [],
-        "competition_sources": [], "kernel_sources": [],
+        "competition_sources": [], "kernel_sources": kernel_sources or [],
     }
 
 
@@ -386,6 +850,10 @@ def build(root: Path, destination: Path, owner: str, slug: str, config: str | No
           dataset_license_description: str | None = None,
           chunk_bytes: int = DEFAULT_KAGGLE_CHUNK_BYTES,
           segment_steps: int | None = None,
+          resume_kernel: str | None = None, resume_run_dir: Path | None = None,
+          resume_checkpoint: str | None = None,
+          resume_run_manifest_sha256: str | None = None,
+          resume_checkpoint_manifest_sha256: str | None = None,
           inline_archive_max_bytes: int = INLINE_ARCHIVE_MAX_BYTES,
           smoke_timeout_seconds: int = MAX_GPU_SMOKE_SECONDS) -> None:
     _validate_segment(owner, "kernel owner")
@@ -408,6 +876,9 @@ def build(root: Path, destination: Path, owner: str, slug: str, config: str | No
             raise ValueError("Private dataset options require --input-dataset owner/slug")
         if segment_steps is not None:
             raise ValueError("--segment-steps requires private native-SFT input-dataset mode")
+        if any(value is not None for value in (resume_kernel, resume_run_dir, resume_checkpoint,
+                                                resume_run_manifest_sha256, resume_checkpoint_manifest_sha256)):
+            raise ValueError("Resume options require private native-SFT input-dataset mode")
         if config is not None:
             raise ValueError("Training configs require private-input-dataset mode; inline mode is fixture-smoke-only")
         with tempfile.TemporaryDirectory(prefix="picoagent-kaggle-inline-") as temporary:
@@ -438,6 +909,22 @@ def build(root: Path, destination: Path, owner: str, slug: str, config: str | No
     _validate_handle(input_dataset)
     _dataset_metadata(input_dataset, input_dataset.split("/", 1)[1], dataset_license, dataset_license_description)
     _, config_relative, manifest_relative, _ = _validate_native_sft_inputs(root, config, dataset_manifest)
+    resume_values = (resume_kernel, resume_run_dir, resume_checkpoint,
+                     resume_run_manifest_sha256, resume_checkpoint_manifest_sha256)
+    resume_info = None
+    if any(value is not None for value in resume_values):
+        if not all(value is not None for value in resume_values):
+            raise ValueError("Resume requires kernel handle, retrieved run directory, checkpoint-N, and both exact manifest SHA256 pins")
+        _validate_handle(resume_kernel)
+        if resume_kernel == f"{owner}/{slug}":
+            raise ValueError("Use a new unique kernel slug for each segment; a kernel cannot consume its own mutable output")
+        resume_info = _validate_resume_artifact(
+            root, config_relative, manifest_relative, run_dir=Path(resume_run_dir),
+            checkpoint_name=resume_checkpoint, run_manifest_sha256=resume_run_manifest_sha256,
+            checkpoint_manifest_sha256=resume_checkpoint_manifest_sha256,
+        )
+        resume_info["kernel_source"] = resume_kernel
+        resume_info["output_budget_bytes"] = KAGGLE_OUTPUT_BUDGET_BYTES
     dataset_output = Path(data_output).absolute()
     if dataset_output.exists():
         raise FileExistsError(dataset_output)
@@ -508,7 +995,7 @@ def build(root: Path, destination: Path, owner: str, slug: str, config: str | No
             }
             _write_json(staged_data / "package-receipt.json", data_receipt)
             program = _private_source_program(config_relative, transfer, transfer_bytes, helper, helper_sha,
-                                              segment_steps=segment_steps)
+                                              segment_steps=segment_steps, resume=resume_info)
             package_receipt = {
                 "schema": "picoagent.kaggle-kernel-package-receipt.v1",
                 "mode": "private-input-dataset-native-sft",
@@ -527,13 +1014,16 @@ def build(root: Path, destination: Path, owner: str, slug: str, config: str | No
                 "segment_steps": segment_steps,
                 "output_budget_bytes": KAGGLE_OUTPUT_BUDGET_BYTES,
                 "requested_accelerator": KAGGLE_ACCELERATOR,
+                "resume_source": resume_info,
                 "learner_tools_executed_in_kernel": False,
                 "provider_calls_made": False,
             }
             # Keep package construction metadata in the kernel package so the
             # pinned bundle/helper identity is inspectable before any upload.
             staged_kernel = Path(temporary) / "kernel"
-            _write_kernel_package(staged_kernel, owner, slug, program, input_dataset, package_receipt, source_info=None)
+            _write_kernel_package(staged_kernel, owner, slug, program, input_dataset, package_receipt,
+                                  source_info=None,
+                                  kernel_sources=[resume_kernel] if resume_info else None)
         # Publish both packages only after all local validation and hashing pass.
         os.rename(staged_data, dataset_output)
         try:
@@ -545,11 +1035,12 @@ def build(root: Path, destination: Path, owner: str, slug: str, config: str | No
 
 def _write_kernel_package(destination: Path, owner: str, slug: str, program: str,
                           dataset_source: str | None, receipt: dict[str, Any],
-                          source_info: dict[str, Any] | None) -> None:
+                          source_info: dict[str, Any] | None,
+                          kernel_sources: list[str] | None = None) -> None:
     destination.mkdir(parents=True, exist_ok=False)
     main_path = destination / "main.py"
     main_path.write_text(program, encoding="utf-8")
-    metadata = _kernel_metadata(owner, slug, dataset_source)
+    metadata = _kernel_metadata(owner, slug, dataset_source, kernel_sources)
     metadata_bytes = _write_json(destination / "kernel-metadata.json", metadata)
     package_receipt = {**receipt,
                        "kernel_main_sha256": _sha256_bytes(main_path.read_bytes()),
@@ -573,6 +1064,11 @@ def main() -> None:
     parser.add_argument("--dataset-license-description", help="Required only when --dataset-license other")
     parser.add_argument("--chunk-bytes", type=int, default=DEFAULT_KAGGLE_CHUNK_BYTES, help=f"Chunk size <= {KAGGLE_CHUNK_BYTES_LIMIT} bytes")
     parser.add_argument("--segment-steps", type=int, help="Required native-SFT operational max optimizer updates per Kaggle invocation; full schedule is unchanged")
+    parser.add_argument("--resume-kernel", help="Unique prior Kaggle kernel source handle owner/slug; output is hash-pinned")
+    parser.add_argument("--resume-run-dir", type=Path, help="Locally retrieved prior /kaggle/working/picoagent-training output; verified before package build")
+    parser.add_argument("--resume-checkpoint", help="Exact latest paused checkpoint-N from the retrieved output")
+    parser.add_argument("--resume-run-manifest-sha256", help="Caller-supplied exact run_manifest.json SHA256")
+    parser.add_argument("--resume-checkpoint-manifest-sha256", help="Caller-supplied exact checkpoint-N/checkpoint_manifest.json SHA256")
     parser.add_argument("--inline-archive-max-bytes", type=int, default=INLINE_ARCHIVE_MAX_BYTES, help="Fixture-only inline archive limit; absolute maximum 8 MiB")
     parser.add_argument("--smoke-timeout-seconds", type=int, default=MAX_GPU_SMOKE_SECONDS, help="Whole optional fixture GPU smoke stage; hard maximum 60 seconds")
     args = parser.parse_args()
@@ -581,6 +1077,10 @@ def main() -> None:
           dataset_manifest=args.dataset_manifest, dataset_license=args.dataset_license,
           dataset_license_description=args.dataset_license_description,
           chunk_bytes=args.chunk_bytes, segment_steps=args.segment_steps,
+          resume_kernel=args.resume_kernel, resume_run_dir=args.resume_run_dir,
+          resume_checkpoint=args.resume_checkpoint,
+          resume_run_manifest_sha256=args.resume_run_manifest_sha256,
+          resume_checkpoint_manifest_sha256=args.resume_checkpoint_manifest_sha256,
           inline_archive_max_bytes=args.inline_archive_max_bytes,
           smoke_timeout_seconds=args.smoke_timeout_seconds)
 

@@ -1,0 +1,37 @@
+{
+  "schema": "picoagent.kaggle_resume.local_validation.v1",
+  "base_commit": "f603782ed2801f0bc2e49a170fe174648b661ed8",
+  "source_sha256": {
+    "scripts/kaggle_job.py": "e9d36487d753cc18a223f9ea6582e0c1844782cb6d421ad2614e1a0241cd06d5",
+    "tests/test_kaggle_job.py": "9461a47849e8a4521fc6711f857ed89a93fdb223ca93841947401efa4195eb29",
+    "tests/test_training_smoke.py": "5d4993f7262b36b4e1141c21e4929c1e0f019e8c0da9a48044a282c4fc1bfe68"
+  },
+  "full_suite": {
+    "passed": 368,
+    "skipped": 19,
+    "subtests_passed": 40,
+    "elapsed_seconds": 35.28
+  },
+  "actual_cpu_ml": {
+    "passed": 2,
+    "elapsed_seconds": 8.36,
+    "checks": [
+      "same full optimizer/scheduler step target across segments",
+      "off-cadence pause after a sealed full-state checkpoint",
+      "earlier wall-clock checkpoint can pause segment",
+      "no final export while paused",
+      "hash-pinned prior output restored into a fresh directory",
+      "source, tokenizer and dataset evidence preserved",
+      "only selected checkpoint copied; prior outputs unchanged",
+      "resumed final weights and scheduler equal uninterrupted run exactly"
+    ]
+  },
+  "model": "random tiny pipeline fixture; no pretrained SmolLM2 training",
+  "kaggle_provider_calls": false,
+  "gpu_allocated": false,
+  "limitations": [
+    "Provider mounting, GPU execution and managed-environment continuity remain unvalidated",
+    "This CPU proof is not a learned-agent score",
+    "A future run must reject changed source/config/data/hardware/package identities"
+  ]
+}

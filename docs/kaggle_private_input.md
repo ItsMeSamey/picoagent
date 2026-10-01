@@ -35,6 +35,12 @@ For production, select one self-contained native-teacher dataset manifest under
   training config and runs only native SFT; it does not execute learner tools
 - The kernel metadata pins `machine_shape: NvidiaTeslaT4`. The official CLI also
   supports `kaggle kernels push --accelerator NvidiaTeslaT4`
+- A later segment can attach one retrieved prior kernel output via the official
+  `kernel_sources` owner/slug field. The builder requires the caller's exact
+  checkpoint-N and run/checkpoint-manifest SHA256s, verifies paused status and
+  checkpoint contents, and pins those hashes in the next kernel. Use a
+  never-reused unique slug for every segment; if the prior kernel output changes,
+  the hash checks fail
 - Each invocation uses the unchanged full optimizer schedule and existing
   step/time checkpoint policy. After the first newly sealed full checkpoint, or
   after forcing a save at the segment cap, the run stops cleanly. If training
@@ -83,6 +89,48 @@ matches the selected snapshot, build both local packages:
 Inspect `kernel-package-receipt.json`, `package-receipt.json`, the manifest
 hashes, chosen license, selected data manifest, and chunk count before any
 provider action. Rebuilds intentionally refuse existing output directories.
+
+For a later segment, first retrieve the previous clean paused kernel output,
+independently verify its run/checkpoint receipts, and build a new kernel package
+with that exact local output and hashes. Use a new kernel slug each time. Kaggle
+metadata represents kernel sources as `owner/slug`, rather than an immutable
+version path, so runtime hashes are the final guard against a changed source
+output, as described in the [official kernel metadata reference](https://github.com/Kaggle/kaggle-cli/blob/main/docs/kernels_metadata.md):
+
+```sh
+.venv/bin/python scripts/kaggle_job.py \
+  --root "$PWD" \
+  --owner KAGGLE_OWNER \
+  --slug picoagent-native-sft-seg-002 \
+  --output /tmp/picoagent-kernel-package-seg-002 \
+  --config configs/smol360m_native_t4.json \
+  --input-dataset KAGGLE_OWNER/picoagent-native-input \
+  --data-output /tmp/picoagent-input-dataset-seg-002 \
+  --dataset-manifest data/native-training-plans-v1/manifest.json \
+  --dataset-license copyright-authors \
+  --chunk-bytes 16777216 \
+  --segment-steps 100 \
+  --resume-kernel KAGGLE_OWNER/picoagent-native-sft-seg-001 \
+  --resume-run-dir /tmp/picoagent-seg-001-output/picoagent-training \
+  --resume-checkpoint checkpoint-100 \
+  --resume-run-manifest-sha256 EXACT_VERIFIED_RUN_MANIFEST_SHA256 \
+  --resume-checkpoint-manifest-sha256 EXACT_VERIFIED_CHECKPOINT_MANIFEST_SHA256
+```
+
+The builder rejects missing/partial hash pins, a non-paused or complete run,
+changed source/config/data identity, altered checkpoint files, newer checkpoint
+directories, final artifacts, symlinks and paths escaping the retrieved run.
+The generated kernel searches mounted inputs for the unique pinned run manifest,
+verifies status and every checkpoint byte again, then copies only
+`run_manifest.json`, `dataset_manifest.json`, `run_status.json`, the verified
+`source_snapshot`, `tokenizer_snapshot`, and `dataset_snapshot`, plus the
+selected latest checkpoint into a new `/kaggle/working/picoagent-training`
+directory. It passes that checkpoint to `picoagent.training train --resume`
+with the same full config and schedule. The restore step checks available space
+and the 20 GB cap before copying; the training preflight then counts the full
+restored tree before reserving room for the next checkpoint and eventual final
+model. No older checkpoint is copied or pruned; prior kernel outputs are never
+modified.
 
 If separately authorized to publish the input package, the current Kaggle CLI
 documents `kaggle datasets create` as private by default; it makes a dataset
@@ -153,11 +201,10 @@ Before a production run, a short, approved provider pilot must verify actual
 free-space behavior, checkpoint/output visibility after a clean paused exit,
 and exact T4 environment/hardware identity. The first GPU invocation should be
 native SFT (no separate GPU smoke); local package tests do not prove provider
-side behavior. One further operational gap remains: the builder currently
-packages the initial segment, but does not automatically attach a previously
-retrieved checkpoint to a later kernel version. The next segment must be
-prepared only after the prior output is downloaded and independently verified,
-with the original run manifest and latest full checkpoint restored intact.
+side behavior. Follow-on segment packaging is available after the prior output
+is downloaded and independently verified; the builder makes no provider calls
+and cannot establish that the mounted prior kernel output is still published or
+visible. The caller must supply exact hashes from the verified retrieval.
 
 The segment cap must be short enough to reach a checkpoint before Kaggle's
 session limit. Output-budget checks estimate a checkpoint from parameter count

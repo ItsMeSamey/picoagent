@@ -5,6 +5,7 @@ All models are newly randomized and fixtures explicitly smoke-only.
 """
 import os
 import json
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -13,12 +14,17 @@ from unittest.mock import patch
 
 @unittest.skipUnless(os.environ.get("PICOAGENT_RUN_ML_TESTS") == "1", "optional local torch/Transformers integration smoke")
 class TrainingMLSmokeTests(unittest.TestCase):
-    def test_segmented_resume_matches_uninterrupted_full_schedule(self):
+    def test_kernel_restore_segment_resume_matches_uninterrupted_full_schedule(self):
         import torch
         from safetensors.torch import load_file
         from picoagent.training import train
         from picoagent.training.config import TrainingConfig
         from picoagent.training.smoke import run_smoke
+        import sys
+        scripts = str(Path(__file__).resolve().parents[1] / "scripts")
+        if scripts not in sys.path:
+            sys.path.insert(0, scripts)
+        import kaggle_job
 
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -44,18 +50,38 @@ class TrainingMLSmokeTests(unittest.TestCase):
             self.assertEqual(state["max_steps"], 2)
 
             config = TrainingConfig.load(root / "segmented/smoke-config.json")
-            resumed = train.run_training(config, resume_from_checkpoint=str(run / "checkpoint-1"), segment_steps=1)
+            source_mount = root / "mounted-kernel-source" / "segment-one"
+            source_mount.mkdir(parents=True)
+            shutil.copytree(run, source_mount / "picoagent-training")
+            status = json.loads((run / "run_status.json").read_text())
+            pins = {
+                "run_manifest_sha256": train.sha256_file(run / "run_manifest.json"),
+                "run_status_sha256": train.sha256_file(run / "run_status.json"),
+                "dataset_manifest_sha256": train.sha256_file(run / "dataset_manifest.json"),
+                "checkpoint": status["checkpoint"],
+                "checkpoint_manifest_sha256": status["checkpoint_manifest_sha256"],
+                "global_step": status["global_step"],
+                "planned_global_steps": status["planned_global_steps"],
+                "output_budget_bytes": kaggle_job.KAGGLE_OUTPUT_BUDGET_BYTES,
+            }
+            restored_output = root / "restored-working" / "picoagent-training"
+            restored_output.parent.mkdir()
+            restored_checkpoint = kaggle_job._restore_resume_tree(
+                root / "mounted-kernel-source", restored_output, pins)
+            resumed_config = TrainingConfig(**{**config.as_dict(), "output_dir": str(restored_output)})
+            resumed = train.run_training(resumed_config, resume_from_checkpoint=restored_checkpoint,
+                                         segment_steps=1)
             self.assertEqual(resumed["status"], "completed")
             self.assertEqual(resumed["global_step"], 2)
             self.assertEqual(resumed["planned_global_steps"], 2)
-            self.assertEqual(sorted(path.name for path in run.glob("checkpoint-*")), ["checkpoint-1", "checkpoint-2"])
+            self.assertEqual(sorted(path.name for path in restored_output.glob("checkpoint-*")), ["checkpoint-1", "checkpoint-2"])
 
             reference_weights = load_file(str(Path(reference["artifact"]) / "model.safetensors"))
             segmented_weights = load_file(str(Path(resumed["artifact"]) / "model.safetensors"))
             self.assertEqual(reference_weights.keys(), segmented_weights.keys())
             self.assertTrue(all(torch.equal(reference_weights[key], segmented_weights[key]) for key in reference_weights))
             reference_scheduler = torch.load(root / "reference/run/checkpoint-2/scheduler.pt", weights_only=False)
-            segmented_scheduler = torch.load(run / "checkpoint-2/scheduler.pt", weights_only=False)
+            segmented_scheduler = torch.load(restored_output / "checkpoint-2/scheduler.pt", weights_only=False)
             self.assertEqual(reference_scheduler, segmented_scheduler)
 
             wall = run_smoke(root / "wall-clock-segment", device="cpu", segment_steps=2,
