@@ -11,6 +11,18 @@ def count(messages):
 
 
 class ContextTests(unittest.TestCase):
+    def test_midpoint_uses_tokens_instead_of_message_count(self):
+        source = [{"role": "system", "content": "rules"},
+                  {"role": "user", "content": "a" * 800}] + [
+                      {"role": "assistant" if i % 2 == 0 else "user", "content": "b" * 20}
+                      for i in range(6)]
+        manager = ContextManager(lambda m, t: {"role": "assistant", "content": "brief"},
+                                 max_tokens=1000, reserve_tokens=100, token_counter=count)
+        result = manager.compact(source, force=True)
+        self.assertEqual(result.event["split_index"], 2)
+        self.assertEqual(result.event["source_messages"], source[1:2])
+        self.assertEqual(result.messages[2:], source[2:])
+
     def test_summary_replaces_first_half_and_suffix_is_untouched(self):
         source = [{"role": "system", "content": "rules"}] + [{"role": "user" if i % 2 == 0 else "assistant", "content": str(i) + "x" * 200} for i in range(8)]
         observed = []

@@ -85,18 +85,18 @@ class ContextManager:
         groups = _units(body)
         if len(groups) < 2:
             raise ContextBudgetExceeded("context cannot be compacted without dropping the recent conversation")
-        midpoint = len(body) // 2
-        split_count = 0
-        split_units = 0
-        # Nearest complete boundary at or before the first-half midpoint. If the
-        # very first group crosses it, use that group intact and retain the rest.
+        # Halve the context by its tokenizer budget, not by message count: a
+        # single tool output may be much larger than many short messages.
+        # Subtract pinned/schema overhead included by real policy counters.
+        pinned_tokens = self.token_counter(pinned)
+        midpoint = max(0, before - pinned_tokens) / 2
+        count = 0
+        boundaries = []
         for group in groups[:-1]:
-            if split_count + len(group) > midpoint and split_units:
-                break
-            split_count += len(group)
-            split_units += 1
-            if split_count >= midpoint:
-                break
+            count += len(group)
+            prefix_tokens = max(0, self.token_counter(pinned + body[:count]) - pinned_tokens)
+            boundaries.append((abs(prefix_tokens - midpoint), count))
+        split_count = min(boundaries)[1]
         source = copy.deepcopy(body[:split_count])
         retained = copy.deepcopy(body[split_count:])
         summary_request = [
