@@ -182,8 +182,20 @@ def collect_task(task: dict[str, Any], archive_root: str | Path, *, model: Calla
     def observed_model(model_messages: list[dict], tools: list[dict]) -> dict:
         # Journal before validation so malformed/rejected model output is retained.
         archive.event("model_request", {"messages": model_messages, "tools": tools})
-        result = callback(model_messages, tools)
-        archive.event("model_response", result)
+        try:
+            result = callback(model_messages, tools)
+        except Exception as exc:
+            archive.event("model_exception", {"type": type(exc).__name__, "message": str(exc),
+                                               "provider_generation": copy.deepcopy(getattr(callback, "last_generation", None))})
+            raise
+        generation = copy.deepcopy(getattr(callback, "last_generation", None))
+        if generation is not None:
+            archive.event("provider_generation", generation)
+        try:
+            archive.event("model_response", result)
+        except (ValueError, TypeError):
+            archive.event("unserializable_model_response", {"python_repr": repr(result), "note": "Non-JSON Python callback return; repr preserved"})
+            raise
         return result
 
     backend = None

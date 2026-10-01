@@ -27,7 +27,8 @@ class TrainingConfig:
     num_train_epochs: float = 1.0
     max_steps: int = -1
     warmup_ratio: float = 0.03
-    save_steps: int = 100
+    save_steps: int = 10
+    checkpoint_interval_seconds: float | None = 300.0
     logging_steps: int = 10
     seed: int = 20261001
     deterministic: bool = True
@@ -64,6 +65,8 @@ class TrainingConfig:
             raise ValueError("seed must be a nonnegative integer")
         if not isinstance(self.max_steps, int) or isinstance(self.max_steps, bool) or self.max_steps == 0 or self.max_steps < -1:
             raise ValueError("max_steps must be -1 or a positive integer")
+        if self.checkpoint_interval_seconds is not None and (not isinstance(self.checkpoint_interval_seconds, (int, float)) or isinstance(self.checkpoint_interval_seconds, bool) or not math.isfinite(self.checkpoint_interval_seconds) or self.checkpoint_interval_seconds <= 0):
+            raise ValueError("checkpoint_interval_seconds must be finite positive seconds or null")
         for key in ("learning_rate", "num_train_epochs"):
             value = getattr(self, key)
             if not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(value) or value <= 0:

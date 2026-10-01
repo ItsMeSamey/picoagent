@@ -122,3 +122,41 @@ def test_curriculum_manifest_is_reproducible_and_detects_tamper(tmp_path):
     target.write_text(target.read_text() + " ")
     with pytest.raises(ValueError, match="hash"):
         verify_curriculum(paths[0])
+
+
+def test_installed_help_and_original_source_curriculum_is_separate(tmp_path):
+    from picoagent.data.tool_curriculum import TOOL_SPLIT_POLICY, generate_tool_tasks
+    tasks = generate_tool_tasks(seeds_per_family=3)
+    assert audit_tasks(tasks)["counts"] == {"train": 6, "dev": 6, "test": 6}
+    assert not set(TOOL_SPLIT_POLICY) & set(SPLIT_POLICY)
+    for task in tasks:
+        assert authored_example(task)["verification"]["author_answer_matches"]
+        first = task["reference"]["plan"][0]["arguments"]["command"]
+        assert "--help" in first or "-m pydoc" in first or first.startswith("cat local_api_")
+        for path, source in task["environment"]["files"].items():
+            if path.endswith(".py"):
+                ast.parse(source)  # Never execute generated module on the host.
+    manifest = write_curriculum(tmp_path / "tools", tasks, configuration={"track": "tool-docs"}, split_policy=TOOL_SPLIT_POLICY)
+    assert verify_curriculum(manifest)["passed"]
+
+
+def test_doc_driven_api_arguments_follow_observed_semantics():
+    from picoagent.data.collector import ScriptedTeacher
+    from picoagent.data.tool_curriculum import generate_tool_task
+    for family in ("tool_docs.pydoc_affine", "tool_docs.source_index", "tool_docs.pydoc_window"):
+        for seed in range(5):
+            task = generate_tool_task(family, seed)
+            teacher = ScriptedTeacher(task)
+            teacher.step = 1
+            source = next(text for path, text in task["environment"]["files"].items() if path.endswith(".py"))
+            observed = [{"role": "tool", "tool_call_id": "read_docs", "content": canonical_json({"stdout": source, "exit_code": 0})}]
+            output = teacher(observed, [])
+            code = json.loads(output["tool_calls"][0]["function"]["arguments"])["code"]
+            ast.parse(code)
+            assert "input/values.json" in code
+            if family.endswith("source_index"):
+                expected_position = 3 if "positions are 1-based" in source else 2
+                assert f"lookup(values, {expected_position})" in code
+            elif family.endswith("pydoc_window"):
+                endpoint = 4 if "stop is inclusive" in source else 5
+                assert f"select(values, 2, {endpoint})" in code

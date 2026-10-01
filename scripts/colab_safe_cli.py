@@ -6,18 +6,26 @@ change auth, session selection, TLS verification, or remote kernel lifetime.
 """
 from __future__ import annotations
 
+import os
 import sys
-import re
 
 
-def main() -> None:
-    from colab_cli.runtime import ColabRuntime
-    from colab_cli.cli import app
-    import websocket
+def report_error(label: str, error: BaseException) -> None:
+    """Report locations, never exception text, source lines, URLs, or frame locals."""
+    print(f"[picoagent {label}] {type(error).__name__}", file=sys.stderr)
+    tb = error.__traceback__
+    while tb is not None:
+        code = tb.tb_frame.f_code
+        location = f"{os.path.basename(code.co_filename)}:{tb.tb_lineno} {code.co_name}"
+        print(f"[picoagent {label}] {location}", file=sys.stderr)
+        tb = tb.tb_next
 
+
+def invoke(app, runtime_class, websocket_class) -> None:
+    """Keep cleanup outside the vendor CLI's initial execute/cwd operation."""
     runtimes = []
-    original_init = ColabRuntime.__init__
-    original_ws_init = websocket.WebSocketApp.__init__
+    original_init = runtime_class.__init__
+    original_ws_init = websocket_class.__init__
 
     def runtime_init(self, *args, **kwargs):
         original_init(self, *args, **kwargs)
@@ -27,20 +35,15 @@ def main() -> None:
         original_error = kwargs.get("on_error")
 
         def on_error(ws, error):
-            # Type only: exception strings can contain private proxy URLs/tokens.
-            print(f"[picoagent transport] {type(error).__name__}", file=sys.stderr)
-            if isinstance(error, AttributeError):
-                match = re.search(r"'([A-Za-z_][A-Za-z_0-9.]*)' object has no attribute '([A-Za-z_][A-Za-z_0-9]*)'", str(error))
-                if match:
-                    print(f"[picoagent transport] {match.group(1)} missing {match.group(2)}", file=sys.stderr)
+            report_error("transport", error)
             if original_error:
                 original_error(ws, error)
 
         kwargs["on_error"] = on_error
         original_ws_init(self, *args, **kwargs)
 
-    ColabRuntime.__init__ = runtime_init
-    websocket.WebSocketApp.__init__ = ws_init
+    runtime_class.__init__ = runtime_init
+    websocket_class.__init__ = ws_init
     try:
         app()
     finally:
@@ -49,7 +52,22 @@ def main() -> None:
                 try:
                     runtime.stop()
                 except Exception as error:
-                    print(f"[picoagent cleanup] {type(error).__name__}", file=sys.stderr)
+                    report_error("cleanup", error)
+        runtime_class.__init__ = original_init
+        websocket_class.__init__ = original_ws_init
+
+
+def main() -> None:
+    from colab_cli.cli import app
+    from colab_cli.runtime import ColabRuntime
+    import websocket
+
+    try:
+        invoke(app, ColabRuntime, websocket.WebSocketApp)
+    except Exception as error:
+        # Typer's rich traceback can expose runtime URLs and credentials in locals.
+        report_error("cli", error)
+        raise SystemExit(1) from None
 
 
 if __name__ == "__main__":

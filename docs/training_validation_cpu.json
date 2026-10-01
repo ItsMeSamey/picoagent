@@ -1,26 +1,34 @@
 {
-  "verified_at": "2026-10-01T11:07:09.091003+00:00",
+  "verified_at": "2026-10-01T11:17:53.981528+00:00",
+  "versions": {
+    "torch": "2.14.1+cpu",
+    "transformers": "5.18.0",
+    "accelerate": "1.15.0",
+    "tokenizers": "0.23.2",
+    "pytest": "9.1.1",
+    "setuptools": "84.0.0"
+  },
   "reference": {
-    "output_dir": "/tmp/picoagent-validation-reference/run",
-    "artifact": "/tmp/picoagent-validation-reference/run/final-model",
+    "output_dir": "/tmp/picoagent-validation-v5-reference/run",
+    "artifact": "/tmp/picoagent-validation-v5-reference/run/final-model",
     "training_mode": "full",
     "precision": "fp32",
     "device": "cpu",
     "trainable_parameters": 90592,
     "metrics": {
       "training": {
-        "train_runtime": 0.2965,
-        "train_samples_per_second": 13.491,
-        "train_steps_per_second": 6.745,
+        "train_runtime": 0.3613,
+        "train_samples_per_second": 11.072,
+        "train_steps_per_second": 5.536,
         "total_flos": 266902272.0,
         "train_loss": 5.961413383483887,
         "epoch": 2.0
       },
       "development": {
         "eval_loss": 5.8917012214660645,
-        "eval_runtime": 0.021,
-        "eval_samples_per_second": 47.558,
-        "eval_steps_per_second": 47.558,
+        "eval_runtime": 0.0129,
+        "eval_samples_per_second": 77.356,
+        "eval_steps_per_second": 77.356,
         "epoch": 2.0
       },
       "benchmark": null
@@ -29,26 +37,26 @@
     "interpretation": "Random model pipeline smoke, synthetic unexecuted fixture, pipeline validation only; no agent capability or benchmark claim"
   },
   "resumed": {
-    "output_dir": "/tmp/picoagent-validation-interrupted/run",
-    "artifact": "/tmp/picoagent-validation-interrupted/run/final-model",
+    "output_dir": "/tmp/picoagent-validation-v5-interrupted/run",
+    "artifact": "/tmp/picoagent-validation-v5-interrupted/run/final-model",
     "training_mode": "full",
     "precision": "fp32",
     "device": "cpu",
     "trainable_parameters": 90592,
     "metrics": {
       "training": {
-        "train_runtime": 0.1254,
-        "train_samples_per_second": 31.901,
-        "train_steps_per_second": 15.951,
+        "train_runtime": 0.1454,
+        "train_samples_per_second": 27.504,
+        "train_steps_per_second": 13.752,
         "total_flos": 266902272.0,
         "train_loss": 2.9807066917419434,
         "epoch": 2.0
       },
       "development": {
         "eval_loss": 5.8917012214660645,
-        "eval_runtime": 0.0213,
-        "eval_samples_per_second": 46.906,
-        "eval_steps_per_second": 46.906,
+        "eval_runtime": 0.0221,
+        "eval_samples_per_second": 45.236,
+        "eval_steps_per_second": 45.236,
         "epoch": 2.0
       },
       "benchmark": null
@@ -61,8 +69,8 @@
   "hashes": {
     "reference_model": "5ed4aafa26dcf883e1594c4e74915350008bb4874ce780c9ad1f57bbfc9ca53a",
     "resumed_model": "5ed4aafa26dcf883e1594c4e74915350008bb4874ce780c9ad1f57bbfc9ca53a",
-    "reference_manifest": "e0c245dbfc9dbf73878cb5ace1dff2174f01809e9a7fc851ed0cf97fc552a478",
-    "resumed_manifest": "0c278ab2b4205d836f8ffb4396e355702905ed5c09365398c63f8f7a3fc287d9",
-    "resumed_checkpoint_1_manifest": "b59abca12719502df1582d49a9bca40a3982918df3c45fc77a74361ec60d9175"
+    "reference_manifest": "5a83d08c3e091457e5053e23f33072f9cae3f000971a6ad565044bc399d8432b",
+    "resumed_manifest": "6296943e9c8ff0a2d455a97272353b0f2c032c89cebf032bae3c47a51268437a",
+    "resumed_checkpoint_1_manifest": "ed586a51c6708b93154871267008a968e3c963245fd6f1db5d6275c86b659257"
   }
 }

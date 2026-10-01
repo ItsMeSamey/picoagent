@@ -43,3 +43,15 @@ class ResumePreflightTests(unittest.TestCase):
                 write_json(path, {"overwritten": True}, exclusive=True)
             self.assertEqual(json.loads(path.read_text()), {"original": True})
             self.assertEqual([p.name for p in Path(temp).iterdir()], ["manifest.json"])
+
+class ModelSnapshotRevisionTests(unittest.TestCase):
+    def test_reads_cache_revision_without_following_blob_symlink(self):
+        from picoagent.training.provenance import snapshot_revision
+        commit = "a" * 40
+        self.assertEqual(snapshot_revision(f"/cache/models--org--model/snapshots/{commit}/config.json"), commit)
+
+    def test_rejects_branch_or_non_snapshot_identity(self):
+        from picoagent.training.provenance import snapshot_revision
+        for path in ("/cache/model/config.json", "/cache/model/snapshots/main/config.json", "/cache/model/snapshots/shortsha/config.json"):
+            with self.subTest(path=path), self.assertRaises(ValueError):
+                snapshot_revision(path)

@@ -61,14 +61,24 @@ this is not a promise that the entire full-fine-tuning footprint becomes 16-bit.
 Gradient checkpointing, batch size 1, and accumulation are enabled in presets.
 
 Use a matched `torch`/`torch_xla` installation on TPU; never independently upgrade
-torch in a preconfigured Colab TPU runtime. The initial tested local CPU stack was
-torch 2.14.1+cpu, Transformers 4.57.6, Accelerate 1.15.0, Tokenizers 0.22.2.
+torch in a preconfigured Colab TPU runtime. The currently validated local CPU stack is
+torch 2.14.1+cpu, Transformers 5.18.0, Accelerate 1.15.0, Tokenizers 0.23.2.
+Use the patched Transformers 5.10+ dependency range; legacy 4.x validation was
+superseded before production. See `docs/training_validation.md` for current evidence.
 The TPU target stack supplied by Colab was torch 2.9.0 / torch_xla 2.9.0; runtime
 validation is required and is recorded separately from CPU results. XLA pads every
 sequence to `max_seq_length` to limit recompilation. This baseline supports one
 process/device; no implicit multi-TPU/DDP or QLoRA-on-TPU support is claimed.
 
 ## Checkpoints and recovery
+
+Presets save every 10 optimizer steps. An independent 300-second wall-clock
+interval also requests evaluation plus a full-state save at the next completed
+optimizer step; set `checkpoint_interval_seconds` to `null` to disable that
+extra deadline. A long TPU compilation or optimizer step cannot be interrupted
+safely for a mid-step save, so the interval is a deadline checked at step ends,
+not a guarantee of a save during an unfinished step. Both settings are frozen
+in the run config/provenance.
 
 Each run saves its original config, package versions, hardware, model revision,
 source hashes and source snapshot, tokenizer snapshot, exact dataset snapshot,

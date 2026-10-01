@@ -14,7 +14,7 @@
   "num_train_epochs": 1.0,
   "max_steps": -1,
   "warmup_ratio": 0.03,
-  "save_steps": 100,
+  "save_steps": 10,
   "logging_steps": 10,
   "seed": 20261001,
   "deterministic": true,
@@ -22,5 +22,6 @@
   "lora_rank": 16,
   "lora_alpha": 32,
   "lora_dropout": 0.0,
-  "device": "cuda"
+  "device": "cuda",
+  "checkpoint_interval_seconds": 300.0
 }

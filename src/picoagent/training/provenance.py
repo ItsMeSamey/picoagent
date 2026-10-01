@@ -121,3 +121,30 @@ def preflight_resume(output: Path, checkpoint: Path, *, max_steps: int) -> None:
             raise ValueError("Checkpoint step does not agree with trainer_state.json")
         if max_steps > 0 and selected >= max_steps:
             raise ValueError("Checkpoint already reaches the configured training budget; it can be used directly for inference without retraining")
+
+
+def snapshot_revision(path: str | Path) -> str:
+    """Read immutable Hub cache identity without resolving snapshot symlinks."""
+    import re
+
+    parts = Path(path).parts
+    candidates = [parts[index + 1] for index, part in enumerate(parts[:-1]) if part == "snapshots"]
+    if len(candidates) != 1 or not re.fullmatch(r"[0-9a-f]{40}", candidates[0]):
+        raise ValueError("Expected an immutable Hugging Face snapshots/<commit>/ asset path")
+    return candidates[0]
+
+
+def cached_model_evidence(model_id: str, revision: str) -> dict[str, str]:
+    """Verify the already-loaded pinned configuration's cache identity and bytes.
+
+    Transformers 5.18 removed config._commit_hash. Every model/tokenizer load is
+    still pinned; this verifies the cached config asset independently of that
+    removed private attribute, without another network request or branch lookup.
+    """
+    from huggingface_hub import hf_hub_download
+
+    config_path = hf_hub_download(repo_id=model_id, filename="config.json", revision=revision, local_files_only=True)
+    resolved = snapshot_revision(config_path)
+    if resolved != revision:
+        raise ValueError("Cached model config revision differs from immutable requested revision")
+    return {"resolved_revision": resolved, "config_sha256": sha256_file(config_path)}

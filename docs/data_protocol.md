@@ -89,3 +89,15 @@ Prefer a 4096-token initial training configuration, then measure with the exact 
 ## Remaining experiments
 
 The bootstrap lacks live web search, rich failure recovery, broad tool APIs, and long-horizon/compaction examples. Add original tasks that require actual installed CLI `--help`, `python -m pydoc`, available man/info pages, and reading novel local module source, then executing the discovered behavior. Keep independently authored API/grammar/composition families held out. Counterfactual paired manuals and state-changing tasks distinguish real observation use from ceremonial tool calls.
+
+### Separate documentation-execution expansion
+
+`data/tool-docs-v1` supplies 48 additional **unexecuted** task specifications (16 per split) without changing or merging the 512-example bootstrap. Reproduce with:
+
+```bash
+python -m picoagent.data generate-tools --output-dir data/new-tool-docs --seeds-per-family 8
+```
+
+Its training families use actual `sort --help` and `python -m pydoc` for original local numeric APIs. Development uses `cut --help` and source-defined zero/one-based indexing; test uses `uniq --help` and independently authored inclusive/exclusive window semantics. Local API names and semantics vary by seed. For these tasks the teacher derives callable names, index origins, and endpoint arguments from actual observed documentation output; it does not embed hidden oracle values. Generated module source is original and preserved in task fixtures. Unit tests parse these modules and check pure expected values, without executing their code on the host.
+
+Collect this track separately through the same runtime collector after reviewing its task definitions; it has not been added to the initial training data. Installed help output can be lengthy: measure exact per-decision token lengths before admitting it. The track does not include man/GNU info pages because their installed availability has not been established; no page read is claimed before actual execution.

@@ -13,6 +13,7 @@ from unittest.mock import patch
 @unittest.skipUnless(os.environ.get("PICOAGENT_RUN_ML_TESTS") == "1", "optional local torch/Transformers integration smoke")
 class TrainingMLSmokeTests(unittest.TestCase):
     def test_full_sft_interruption_resume_matches_uninterrupted_weights(self):
+        import dataclasses
         import torch
         from safetensors.torch import load_file
         from picoagent.training import train
@@ -46,3 +47,11 @@ class TrainingMLSmokeTests(unittest.TestCase):
             self.assertEqual(resumed["training_mode"], "full")
             self.assertTrue(resumed["smoke_only"])
             self.assertIsNone(resumed["metrics"]["benchmark"])
+            # Force the independent wall-clock path while the step interval is
+            # larger than the whole run. Checkpoint one must still be sealed.
+            wall_config = dataclasses.replace(TrainingConfig.load(root / "reference/smoke-config.json"),
+                output_dir=str(root / "wall-clock-run"), save_steps=100,
+                checkpoint_interval_seconds=0.000001)
+            train.run_training(wall_config)
+            wall_run = root / "wall-clock-run"
+            verify_checkpoint(wall_run / "checkpoint-1", sha256_file(wall_run / "run_manifest.json"))

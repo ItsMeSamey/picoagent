@@ -51,12 +51,12 @@ class HFPolicy:
             from peft import PeftModel
             base = AutoModelForCausalLM.from_pretrained(
                 metadata["base_model_id"], revision=base_revision,
-                torch_dtype=dtype, trust_remote_code=False,
+                dtype=dtype, trust_remote_code=False,
             )
             self.model = PeftModel.from_pretrained(base, model).to(device).eval()
         else:
             self.model = AutoModelForCausalLM.from_pretrained(
-                model, revision=revision, torch_dtype=dtype, trust_remote_code=False,
+                model, revision=revision, dtype=dtype, trust_remote_code=False,
             ).to(device).eval()
         self.max_new_tokens = max_new_tokens
         self.device = device

@@ -8,10 +8,11 @@ from pathlib import Path
 from typing import Any
 
 from .config import TrainingConfig, select_precision
+from .checkpointing import CheckpointTimer
 from .data import sha256_file, verify_dataset
 from .encoding import AssistantOnlyCollator, encode_records
 from .device import resolve_device
-from .provenance import checkpoint_evidence, code_evidence, environment_evidence, now_utc, tree_hashes, verify_checkpoint, write_json, preflight_resume
+from .provenance import checkpoint_evidence, code_evidence, environment_evidence, now_utc, tree_hashes, verify_checkpoint, write_json, preflight_resume, cached_model_evidence
 
 
 def _snapshot_code(output: Path, evidence: dict[str, Any]) -> None:
@@ -94,7 +95,7 @@ def run_training(config: TrainingConfig, *, resume_from_checkpoint: str | None =
     tokenizer.padding_side = "right"
     train_data, train_stats = encode_records(rows["train"], tokenizer, config.max_seq_length)
     dev_data, dev_stats = encode_records(rows["dev"], tokenizer, config.max_seq_length)
-    load_args: dict[str, Any] = dict(common, torch_dtype=torch.float32, attn_implementation="eager")
+    load_args: dict[str, Any] = dict(common, dtype=torch.float32, attn_implementation="eager")
     if config.training_mode == "qlora":
         compute_dtype = {"bf16": torch.bfloat16, "fp16": torch.float16, "fp32": torch.float32}[precision]
         load_args.update(quantization_config=BitsAndBytesConfig(
@@ -104,9 +105,8 @@ def run_training(config: TrainingConfig, *, resume_from_checkpoint: str | None =
     context_limit = getattr(model.config, "max_position_embeddings", None)
     if context_limit is not None and config.max_seq_length > context_limit:
         raise ValueError(f"max_seq_length exceeds model context limit {context_limit}")
-    resolved_revision = getattr(model.config, "_commit_hash", None)
-    if not config.smoke_test and resolved_revision != config.model_revision:
-        raise ValueError(f"Resolved model revision {resolved_revision!r} differs from pinned revision")
+    model_cache = {} if config.smoke_test else cached_model_evidence(config.model_id, config.model_revision)
+    resolved_revision = model_cache.get("resolved_revision")
     model.config.use_cache = False
     model.config.pad_token_id = tokenizer.pad_token_id
     if config.training_mode == "qlora":
@@ -145,7 +145,7 @@ def run_training(config: TrainingConfig, *, resume_from_checkpoint: str | None =
         evidence = {
             "schema": "picoagent.training.run.v1", "created_at": now_utc(), "identity": identity, "original_config": config_payload,
             "model": {"id": config.model_id, "requested_revision": config.model_revision,
-                "resolved_revision": resolved_revision, "local_files": tree_hashes(Path(config.model_id)) if config.smoke_test else None},
+                "resolved_revision": resolved_revision, "cached_assets": model_cache, "local_files": tree_hashes(Path(config.model_id)) if config.smoke_test else None},
             "mode": config.training_mode,
             "parameter_policy": "all_parameters_fp32_master_with_autocast" if config.training_mode == "full" else "frozen_nf4_base_trainable_lora_adapters",
             "parameter_counts": {"total": total_parameters, "trainable": trainable_parameters},
@@ -163,9 +163,24 @@ def run_training(config: TrainingConfig, *, resume_from_checkpoint: str | None =
     run_manifest_hash = sha256_file(output / "run_manifest.json")
 
     class AuditCheckpoint(TrainerCallback):
+        def __init__(self):
+            self.timer = CheckpointTimer(config.checkpoint_interval_seconds)
+
+        def on_train_begin(self, args: Any, state: Any, control: Any, **kwargs: Any) -> Any:
+            self.timer.mark_saved()
+            return control
+
+        def on_step_end(self, args: Any, state: Any, control: Any, **kwargs: Any) -> Any:
+            # HF calls this after a completed optimizer step, never mid-update.
+            if self.timer.due():
+                control.should_save = True
+                control.should_evaluate = True
+            return control
+
         def on_save(self, args: Any, state: Any, control: Any, **kwargs: Any) -> Any:
             if state.is_world_process_zero:
                 checkpoint_evidence(output / f"checkpoint-{state.global_step}", run_manifest_hash)
+            self.timer.mark_saved()
             return control
 
     arguments = TrainingArguments(
@@ -175,12 +190,12 @@ def run_training(config: TrainingConfig, *, resume_from_checkpoint: str | None =
         gradient_checkpointing=config.gradient_checkpointing,
         gradient_checkpointing_kwargs={"use_reentrant": False}, learning_rate=config.learning_rate,
         weight_decay=config.weight_decay, num_train_epochs=config.num_train_epochs, max_steps=config.max_steps,
-        warmup_ratio=config.warmup_ratio, lr_scheduler_type="cosine", optim="adamw_torch",
+        warmup_steps=config.warmup_ratio, lr_scheduler_type="cosine", optim="adamw_torch",
         bf16=precision == "bf16" and device != "xla", fp16=precision == "fp16", use_cpu=device == "cpu",
         seed=config.seed, data_seed=config.seed, full_determinism=config.deterministic,
         logging_steps=config.logging_steps, logging_strategy="steps", logging_nan_inf_filter=False,
         eval_strategy="steps", eval_steps=config.save_steps, prediction_loss_only=True,
-        save_strategy="steps", save_steps=config.save_steps, save_total_limit=None, save_safetensors=True,
+        save_strategy="steps", save_steps=config.save_steps, save_total_limit=None,
         save_only_model=False, load_best_model_at_end=False, metric_for_best_model="eval_loss",
         greater_is_better=False, dataloader_num_workers=0,
         dataloader_pin_memory=cuda, remove_unused_columns=False, report_to=[], push_to_hub=False,

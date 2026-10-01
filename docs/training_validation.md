@@ -2,8 +2,13 @@
 
 ## CPU pipeline and interruption recovery: passed
 
-Verified 2026-10-01 11:07 UTC on Python 3.12.14, torch 2.14.1+cpu,
-Transformers 4.57.6, Accelerate 1.15.0 and Tokenizers 0.22.2.
+Verified 2026-10-01 11:17 UTC on Python 3.12.14, torch 2.14.1+cpu,
+Transformers 5.18.0, Accelerate 1.15.0, Tokenizers 0.23.2, pytest 9.1.1 and setuptools 84.0.0.
+
+This report supersedes the earlier 4.x validation. The project moved to patched
+Transformers 5.10+ before production after dependency advisories were identified.
+The 5.x API migration uses `dtype`, ratio-valued `warmup_steps`, and mandatory
+safetensors defaults; no legacy 4.x runtime is recommended.
 
 This is a **random-model plumbing test**, not a trained-agent evaluation. The local
 GPT-2 has 90,592 trainable parameters, one 32-wide layer, two attention heads, and a
@@ -38,7 +43,7 @@ Machine-readable values and manifest hashes are in
 [`training_validation_cpu.json`](training_validation_cpu.json). The two final
 model hashes match; run manifests correctly differ because original output/model
 paths and run timestamps differ. Temporary full artifacts were retained at
-`/tmp/picoagent-validation-reference` and `/tmp/picoagent-validation-interrupted`
+`/tmp/picoagent-validation-v5-reference` and `/tmp/picoagent-validation-v5-interrupted`
 on the execution machine; these paths are not a permanent artifact store.
 
 Automated reproducer:
@@ -49,10 +54,16 @@ PICOAGENT_RUN_ML_TESTS=1 PYTHONPATH=src \
 ```
 
 The same integration test passed. Ordinary dependency-free tests skip the heavy
-ML check. At this checkpoint, 47 focused training unit tests passed, covering
+ML check. After the 5.x pinned-cache identity regression was added, 54 focused training unit tests passed, covering
 admission, split/hash integrity, exact assistant/event masking, precision choice,
 resume collisions, atomic manifest writes, and safe checkpoint retention. Ruff
-passed for training code and tests.
+passed for training code and tests. The full 55-test training suite, including the
+real interruption/resume test, passed again on the patched stack at 11:23 UTC.
+A further real run set the step interval above its two-step budget and forced
+the wall-clock deadline; step one still produced a sealed, verified full-state
+checkpoint. This checks the independent timer-triggered save callback.
+The production pin check now records cached config snapshot revision and SHA256
+instead of the private `_commit_hash` attribute removed by Transformers 5.18.
 
 The controlled interruption tests recovery after a completed save. It does not
 simulate arbitrary process death during every possible individual filesystem write;

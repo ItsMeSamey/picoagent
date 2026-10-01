@@ -134,7 +134,7 @@ def test_local_adapter_loads_explicit_pinned_base_before_attaching(tmp_path, fak
     # Loading the adapter path with AutoModelForCausalLM would let Transformers
     # re-resolve the base model at its default branch instead of this exact SHA.
     assert fake_ml.calls["base"] == [(("example/base",), {
-        "revision": revision, "torch_dtype": "mock-fp32", "trust_remote_code": False,
+        "revision": revision, "dtype": "mock-fp32", "trust_remote_code": False,
     })]
     assert fake_ml.calls["adapter"] == [((fake_ml.base, str(tmp_path)), {})]
     assert policy.model is fake_ml.adapted
