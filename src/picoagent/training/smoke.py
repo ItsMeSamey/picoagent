@@ -14,9 +14,17 @@ from .data import canonical_json, prepare_dataset
 from .train import run_training
 
 
-def run_smoke(output_dir: str | Path, *, device: str = "cpu") -> dict[str, Any]:
+def run_smoke(output_dir: str | Path, *, device: str = "cpu", segment_steps: int | None = None,
+              train_records: int = 2, gradient_accumulation_steps: int = 2,
+              save_steps: int = 1, checkpoint_interval_seconds: float | None = 300.0) -> dict[str, Any]:
     if device not in {"cpu", "cuda", "xla"}:
         raise ValueError("Smoke device must be explicit: cpu, cuda, or xla")
+    if type(train_records) is not int or train_records < 2:
+        raise ValueError("Smoke train_records must be an integer of at least two")
+    if type(gradient_accumulation_steps) is not int or gradient_accumulation_steps <= 0:
+        raise ValueError("Smoke gradient_accumulation_steps must be a positive integer")
+    if type(save_steps) is not int or save_steps <= 0:
+        raise ValueError("Smoke save_steps must be a positive integer")
     import os
     if device != "xla":
         os.environ["USE_TORCH_XLA"] = "0"
@@ -34,7 +42,9 @@ def run_smoke(output_dir: str | Path, *, device: str = "cpu") -> dict[str, Any]:
     set_seed(7)
     torch.set_num_threads(min(2, torch.get_num_threads()))
     rows: dict[str, list[dict[str, Any]]] = {"train": [], "dev": []}
-    for split, number in (("train", 2), ("train", 3), ("dev", 4)):
+    dev_number = 4 if train_records == 2 else 99
+    records = [("train", number) for number in range(2, 2 + train_records)] + [("dev", dev_number)]
+    for split, number in records:
         call_id = f"smoke-call-{number}"
         rows[split].append({
             "schema_version": 1, "trace_id": f"smoke-trace-{number}", "task_id": f"smoke-task-{number}",
@@ -71,9 +81,10 @@ def run_smoke(output_dir: str | Path, *, device: str = "cpu") -> dict[str, Any]:
     model.save_pretrained(local_model)
     config = TrainingConfig(model_id=str(local_model), model_revision=None, dataset_manifest=str(manifest),
         output_dir=str(root / "run"), max_seq_length=2048, per_device_batch_size=1,
-        gradient_accumulation_steps=2, gradient_checkpointing=True, learning_rate=1e-3,
-        max_steps=2, save_steps=1, logging_steps=1, precision="auto", device=device, seed=7, smoke_test=True)
+        gradient_accumulation_steps=gradient_accumulation_steps, gradient_checkpointing=True, learning_rate=1e-3,
+        max_steps=2, save_steps=save_steps, checkpoint_interval_seconds=checkpoint_interval_seconds,
+        logging_steps=1, precision="auto", device=device, seed=7, smoke_test=True)
     (root / "smoke-config.json").write_text(canonical_json(config.as_dict()) + "\n")
-    result = run_training(config)
+    result = run_training(config, segment_steps=segment_steps)
     result["interpretation"] = "Random model pipeline smoke, synthetic unexecuted fixture, pipeline validation only; no agent capability or benchmark claim"
     return result

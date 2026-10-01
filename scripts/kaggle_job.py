@@ -24,6 +24,8 @@ INLINE_ARCHIVE_MAX_BYTES = 8 * 1024 * 1024
 DEFAULT_KAGGLE_CHUNK_BYTES = 16 * 1024 * 1024
 KAGGLE_CHUNK_BYTES_LIMIT = 32 * 1024 * 1024
 MAX_GPU_SMOKE_SECONDS = 60
+KAGGLE_OUTPUT_BUDGET_BYTES = 20_000_000_000
+KAGGLE_ACCELERATOR = "NvidiaTeslaT4"
 SUPPORTED_DATASET_LICENSES = {"unknown", "copyright-authors", "other"}
 HANDLE_SEGMENT = re.compile(r"[A-Za-z0-9_-]{3,50}\Z")
 PINNED_PACKAGES = ("transformers==5.18.0", "accelerate==1.15.0", "tokenizers==0.23.2")
@@ -256,7 +258,7 @@ if result.returncode:
 
 
 def _private_source_program(config: str, transfer_manifest: dict[str, Any], manifest_bytes: bytes,
-                            helper: str, helper_sha256: str) -> str:
+                            helper: str, helper_sha256: str, *, segment_steps: int) -> str:
     _validate_handle(transfer_manifest["dataset_handle"])
     manifest_sha = _sha256_bytes(manifest_bytes)
     expected_json = json.dumps(transfer_manifest, sort_keys=True, indent=2) + "\n"
@@ -323,10 +325,10 @@ stage_result = extract_source_archive(archive_path, str(project), bundle)
 if stage_result.get("verified") is not True:
     raise RuntimeError("Source staging did not verify extracted files")
 '''
-    return prefix + _training_tail(config)
+    return prefix + _training_tail(config, segment_steps)
 
 
-def _training_tail(config: str) -> str:
+def _training_tail(config: str, segment_steps: int) -> str:
     return f'''\nsubprocess.run([sys.executable, "-m", "pip", "install", "--quiet", {PINNED_PACKAGES[0]!r}, {PINNED_PACKAGES[1]!r}, {PINNED_PACKAGES[2]!r}], check=True)
 import torch
 hardware = {{"torch": torch.__version__, "cuda": torch.cuda.is_available(), "devices": torch.cuda.device_count(), "gpu": torch.cuda.get_device_name(0) if torch.cuda.is_available() else None}}
@@ -343,11 +345,25 @@ resolved_config = output / "resolved_training_config.json"
 resolved_config.write_text(json.dumps(training_config, indent=2))
 freeze = subprocess.run([sys.executable, "-m", "pip", "freeze"], capture_output=True, text=True, check=True)
 (output / "environment.txt").write_text(freeze.stdout)
-command = [sys.executable, "-m", "picoagent.training", "train", "--config", str(resolved_config)]
+command = [sys.executable, "-m", "picoagent.training", "train", "--config", str(resolved_config),
+           "--segment-steps", {str(segment_steps)!r}, "--output-budget-bytes", {str(KAGGLE_OUTPUT_BUDGET_BYTES)!r},
+           "--output-budget-root", "/kaggle/working"]
 with (output / "training.log").open("w") as log:
     result = subprocess.run(command, cwd=project, stdout=log, stderr=subprocess.STDOUT, check=False)
 print((output / "training.log").read_text()[-12000:], flush=True)
-(output / "job_status.json").write_text(json.dumps({{"returncode": result.returncode, "native_sft_only": True, "smoke_only": False}}))
+run_status_path = pathlib.Path(training_config["output_dir"]) / "run_status.json"
+if not run_status_path.is_file():
+    raise RuntimeError("Training exited without a run_status.json receipt")
+run_status = json.loads(run_status_path.read_text())
+if run_status.get("status") not in {{"paused", "completed"}}:
+    raise RuntimeError("Training exited without a valid paused/completed status")
+job_status = {{"returncode": result.returncode, "training_status": run_status["status"],
+               "global_step": run_status.get("global_step"),
+               "planned_global_steps": run_status.get("planned_global_steps"),
+               "checkpoint": run_status.get("checkpoint"),
+               "checkpoint_manifest_sha256": run_status.get("checkpoint_manifest_sha256"),
+               "native_sft_only": True, "smoke_only": False}}
+(output / "job_status.json").write_text(json.dumps(job_status, sort_keys=True, indent=2))
 if result.returncode:
     raise RuntimeError("Native SFT command failed; see preserved training.log")
 '''
@@ -358,6 +374,7 @@ def _kernel_metadata(owner: str, slug: str, dataset_source: str | None) -> dict[
         "id": f"{owner}/{slug}", "title": slug.replace("-", " "),
         "code_file": "main.py", "language": "python", "kernel_type": "script",
         "is_private": True, "enable_gpu": True, "enable_internet": True,
+        "machine_shape": KAGGLE_ACCELERATOR,
         "dataset_sources": [dataset_source] if dataset_source else [],
         "competition_sources": [], "kernel_sources": [],
     }
@@ -368,6 +385,7 @@ def build(root: Path, destination: Path, owner: str, slug: str, config: str | No
           dataset_manifest: str | Path | None = None, dataset_license: str | None = None,
           dataset_license_description: str | None = None,
           chunk_bytes: int = DEFAULT_KAGGLE_CHUNK_BYTES,
+          segment_steps: int | None = None,
           inline_archive_max_bytes: int = INLINE_ARCHIVE_MAX_BYTES,
           smoke_timeout_seconds: int = MAX_GPU_SMOKE_SECONDS) -> None:
     _validate_segment(owner, "kernel owner")
@@ -388,6 +406,8 @@ def build(root: Path, destination: Path, owner: str, slug: str, config: str | No
     if input_dataset is None:
         if data_output is not None or dataset_manifest is not None or dataset_license is not None:
             raise ValueError("Private dataset options require --input-dataset owner/slug")
+        if segment_steps is not None:
+            raise ValueError("--segment-steps requires private native-SFT input-dataset mode")
         if config is not None:
             raise ValueError("Training configs require private-input-dataset mode; inline mode is fixture-smoke-only")
         with tempfile.TemporaryDirectory(prefix="picoagent-kaggle-inline-") as temporary:
@@ -413,6 +433,8 @@ def build(root: Path, destination: Path, owner: str, slug: str, config: str | No
         raise ValueError("Private dataset mode requires --data-output, --dataset-manifest, and an explicit --dataset-license")
     if config is None:
         raise ValueError("Private-input mode requires a native SFT config; GPU smoke is a separate small-fixture-only path")
+    if type(segment_steps) is not int or segment_steps <= 0:
+        raise ValueError("Private-input native-SFT mode requires a positive --segment-steps operational limit")
     _validate_handle(input_dataset)
     _dataset_metadata(input_dataset, input_dataset.split("/", 1)[1], dataset_license, dataset_license_description)
     _, config_relative, manifest_relative, _ = _validate_native_sft_inputs(root, config, dataset_manifest)
@@ -485,7 +507,8 @@ def build(root: Path, destination: Path, owner: str, slug: str, config: str | No
                 "files": dataset_files,
             }
             _write_json(staged_data / "package-receipt.json", data_receipt)
-            program = _private_source_program(config_relative, transfer, transfer_bytes, helper, helper_sha)
+            program = _private_source_program(config_relative, transfer, transfer_bytes, helper, helper_sha,
+                                              segment_steps=segment_steps)
             package_receipt = {
                 "schema": "picoagent.kaggle-kernel-package-receipt.v1",
                 "mode": "private-input-dataset-native-sft",
@@ -501,6 +524,9 @@ def build(root: Path, destination: Path, owner: str, slug: str, config: str | No
                 "dataset_privacy": "not provider-verified; upload workflow omits --public",
                 "dataset_license": dataset_license,
                 "native_sft_configuration": True,
+                "segment_steps": segment_steps,
+                "output_budget_bytes": KAGGLE_OUTPUT_BUDGET_BYTES,
+                "requested_accelerator": KAGGLE_ACCELERATOR,
                 "learner_tools_executed_in_kernel": False,
                 "provider_calls_made": False,
             }
@@ -546,6 +572,7 @@ def main() -> None:
     parser.add_argument("--dataset-license", choices=sorted(SUPPORTED_DATASET_LICENSES), help="Explicit Kaggle license value; no CC0 default is applied")
     parser.add_argument("--dataset-license-description", help="Required only when --dataset-license other")
     parser.add_argument("--chunk-bytes", type=int, default=DEFAULT_KAGGLE_CHUNK_BYTES, help=f"Chunk size <= {KAGGLE_CHUNK_BYTES_LIMIT} bytes")
+    parser.add_argument("--segment-steps", type=int, help="Required native-SFT operational max optimizer updates per Kaggle invocation; full schedule is unchanged")
     parser.add_argument("--inline-archive-max-bytes", type=int, default=INLINE_ARCHIVE_MAX_BYTES, help="Fixture-only inline archive limit; absolute maximum 8 MiB")
     parser.add_argument("--smoke-timeout-seconds", type=int, default=MAX_GPU_SMOKE_SECONDS, help="Whole optional fixture GPU smoke stage; hard maximum 60 seconds")
     args = parser.parse_args()
@@ -553,7 +580,8 @@ def main() -> None:
           input_dataset=args.input_dataset, data_output=args.data_output,
           dataset_manifest=args.dataset_manifest, dataset_license=args.dataset_license,
           dataset_license_description=args.dataset_license_description,
-          chunk_bytes=args.chunk_bytes, inline_archive_max_bytes=args.inline_archive_max_bytes,
+          chunk_bytes=args.chunk_bytes, segment_steps=args.segment_steps,
+          inline_archive_max_bytes=args.inline_archive_max_bytes,
           smoke_timeout_seconds=args.smoke_timeout_seconds)
 
 

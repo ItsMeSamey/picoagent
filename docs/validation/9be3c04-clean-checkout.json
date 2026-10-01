@@ -1,0 +1,25 @@
+{
+  "schema": "picoagent.clean_checkout_validation.v1",
+  "commit": "9be3c0415822bb6a72f9b7d41b2792b60e167c2e",
+  "source": "fresh git archive, no untracked source or working data overlay",
+  "dependency_environment": "reused locally locked CPU virtualenv, not a fresh dependency install",
+  "offline": true,
+  "tests": {
+    "passed": 349,
+    "skipped": 18,
+    "subtests_passed": 40,
+    "elapsed_seconds": 45.66
+  },
+  "opt_in_cpu_ml_test": {
+    "passed": 1,
+    "elapsed_seconds": 7.64,
+    "model": "random tiny fixture model, not pretrained SmolLM2"
+  },
+  "production_training": false,
+  "learned_model_scores": null,
+  "earlier_check_findings": [
+    "410f5b5 clean checkout lacked direct access to18 archived pilot journals; exact preserved bytes exposed in9be3c04",
+    "first9be3c04 extraction into /tmp exceeded its separate4.9GiB tmpfs; incomplete duplicate removed and fresh extraction/tests completed on workspace filesystem"
+  ],
+  "selected_dataset_manifest_sha256": "e5774693bc42815ab44858754303b3970c7e34f26a1140425dccdd5853ccfbd9"
+}

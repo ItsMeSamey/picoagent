@@ -1,0 +1,253 @@
+{
+  "accelerator_requested": false,
+  "elapsed_seconds": 195.282,
+  "finished_at_utc": "2026-10-01T15:28:46Z",
+  "hardware_verified_cpu_standard": true,
+  "local_client_metadata": {
+    "request_timeout": 60,
+    "versions": {
+      "google-colab-cli": "0.7.4",
+      "jupyter-kernel-client": "0.9.0",
+      "websocket-client": "1.9.2"
+    },
+    "websocket_constructor_timeout": 60
+  },
+  "operations": [
+    {
+      "allocation_refused": false,
+      "attempted": true,
+      "diagnostic_frames": [],
+      "error_types": [],
+      "exit_code": 0,
+      "operation": "sessions_before",
+      "receipts": [],
+      "session_not_found": false,
+      "session_ready": false,
+      "session_terminated": false,
+      "timed_out": false,
+      "wall_seconds": 15.219
+    },
+    {
+      "allocation_refused": false,
+      "attempted": true,
+      "diagnostic_frames": [],
+      "error_types": [],
+      "exit_code": 0,
+      "operation": "allocate_standard_cpu",
+      "receipts": [],
+      "session_not_found": false,
+      "session_ready": true,
+      "session_terminated": false,
+      "timed_out": false,
+      "wall_seconds": 12.99
+    },
+    {
+      "allocation_refused": false,
+      "attempted": true,
+      "diagnostic_frames": [],
+      "error_types": [],
+      "exit_code": 0,
+      "operation": "verify_hardware",
+      "receipts": [],
+      "session_not_found": false,
+      "session_ready": false,
+      "session_terminated": false,
+      "timed_out": false,
+      "wall_seconds": 8.198
+    },
+    {
+      "allocation_refused": false,
+      "attempted": true,
+      "diagnostic_frames": [],
+      "error_types": [],
+      "exit_code": 0,
+      "operation": "execute_1",
+      "receipts": [
+        {
+          "accelerator_devices_present": false,
+          "probe": 1,
+          "value": 5050
+        }
+      ],
+      "session_not_found": false,
+      "session_ready": false,
+      "session_terminated": false,
+      "timed_out": false,
+      "validated": true,
+      "wall_seconds": 28.125
+    },
+    {
+      "allocation_refused": false,
+      "attempted": true,
+      "diagnostic_frames": [],
+      "error_types": [],
+      "exit_code": 0,
+      "operation": "execute_2",
+      "receipts": [
+        {
+          "accelerator_devices_present": false,
+          "probe": 2,
+          "value": 5050
+        }
+      ],
+      "session_not_found": false,
+      "session_ready": false,
+      "session_terminated": false,
+      "timed_out": false,
+      "validated": true,
+      "wall_seconds": 18.631
+    },
+    {
+      "allocation_refused": false,
+      "attempted": true,
+      "diagnostic_frames": [],
+      "error_types": [],
+      "exit_code": 0,
+      "operation": "execute_3",
+      "receipts": [
+        {
+          "accelerator_devices_present": false,
+          "probe": 3,
+          "value": 5050
+        }
+      ],
+      "session_not_found": false,
+      "session_ready": false,
+      "session_terminated": false,
+      "timed_out": false,
+      "validated": true,
+      "wall_seconds": 28.735
+    },
+    {
+      "allocation_refused": false,
+      "attempted": true,
+      "diagnostic_frames": [],
+      "error_types": [],
+      "exit_code": 0,
+      "operation": "upload_1mib",
+      "receipts": [],
+      "session_not_found": false,
+      "session_ready": false,
+      "session_terminated": false,
+      "timed_out": false,
+      "wall_seconds": 9.714
+    },
+    {
+      "allocation_refused": false,
+      "attempted": true,
+      "diagnostic_frames": [],
+      "error_types": [],
+      "exit_code": 0,
+      "operation": "download_1mib",
+      "receipts": [],
+      "session_not_found": false,
+      "session_ready": false,
+      "session_terminated": false,
+      "timed_out": false,
+      "wall_seconds": 10.935
+    },
+    {
+      "allocation_refused": false,
+      "attempted": true,
+      "diagnostic_frames": [],
+      "error_types": [],
+      "exit_code": 0,
+      "operation": "execute_4",
+      "receipts": [
+        {
+          "accelerator_devices_present": false,
+          "probe": 4,
+          "value": 5050
+        }
+      ],
+      "session_not_found": false,
+      "session_ready": false,
+      "session_terminated": false,
+      "timed_out": false,
+      "validated": true,
+      "wall_seconds": 19.581
+    },
+    {
+      "allocation_refused": false,
+      "attempted": true,
+      "diagnostic_frames": [],
+      "error_types": [],
+      "exit_code": 0,
+      "operation": "execute_5",
+      "receipts": [
+        {
+          "accelerator_devices_present": false,
+          "probe": 5,
+          "value": 5050
+        }
+      ],
+      "session_not_found": false,
+      "session_ready": false,
+      "session_terminated": false,
+      "timed_out": false,
+      "validated": true,
+      "wall_seconds": 20.646
+    },
+    {
+      "allocation_refused": false,
+      "attempted": true,
+      "diagnostic_frames": [],
+      "error_types": [],
+      "exit_code": 0,
+      "operation": "stop_owned_cpu_session",
+      "receipts": [],
+      "session_not_found": false,
+      "session_ready": false,
+      "session_terminated": true,
+      "timed_out": false,
+      "wall_seconds": 11.48
+    },
+    {
+      "allocation_refused": false,
+      "attempted": true,
+      "diagnostic_frames": [],
+      "error_types": [],
+      "exit_code": 0,
+      "operation": "sessions_after",
+      "receipts": [],
+      "session_not_found": false,
+      "session_ready": false,
+      "session_terminated": false,
+      "timed_out": false,
+      "wall_seconds": 10.431
+    }
+  ],
+  "overall_deadline_seconds": 840,
+  "owned_session_absent_after_stop": true,
+  "raw_cli_output_persisted": false,
+  "repeated_execute_verified": true,
+  "request_timeout_seconds": 60,
+  "requested_hardware": "CPU",
+  "requested_shape": "Standard",
+  "roundtrip_verified": true,
+  "schema": "picoagent.colab_cpu_transport_probe.v1",
+  "security_or_auth_configuration_changed": false,
+  "session": "picoagent-transport-cpu-v1",
+  "small_execute_results": [
+    true,
+    true,
+    true,
+    true,
+    true
+  ],
+  "source_sha256": {
+    "colab_cli/commands/execution.py": "ad82ab0798ca28b598c807d0490043d80751a25a61f0260ee5291575f2fee759",
+    "colab_cli/runtime.py": "e95adf8dc98c9a08dce1fff035839863cbe80c9571d36634c3bc3d0cfcf06bcb",
+    "jupyter_kernel_client/constants.py": "63f874790a6c4cb8de5a4c4c08393e8ea91ddb4fbac2b1247993fe9dda19cb5e",
+    "jupyter_kernel_client/wsclient.py": "97744a71e4c1290449ee85a922a5a538f86a2b108934966a76c3b028fa5a4a6d",
+    "websocket/_app.py": "04b2c6d431480c6c10282db90f5f08ba6399af73155ece346cd8a1148045a1ff"
+  },
+  "started_at_utc": "2026-10-01T15:25:31Z",
+  "stop_confirmed": true,
+  "timeout60_demonstrably_reliable_on_this_cpu_probe": true,
+  "transfer_fixture": {
+    "bytes": 1048576,
+    "kind": "synthetic repeating byte values 0..255",
+    "sha256": "fbbab289f7f94b25736c58be46a994c441fd02552cc6022352e3d86d2fab7c83"
+  }
+}

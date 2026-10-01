@@ -31,8 +31,22 @@ For production, select one self-contained native-teacher dataset manifest under
   and smoke data. Native-teacher manifests must have exactly `splits.train` and
   `splits.dev`; artificial-action-plan manifests must have exactly positive
   `counts.train` and `counts.dev`. Missing or additional split keys are rejected.
-  The kernel runs only `picoagent.training train --config …`; it does not execute
-  learner tool calls
+  It requires an operational `--segment-steps` cap outside the immutable
+  training config and runs only native SFT; it does not execute learner tools
+- The kernel metadata pins `machine_shape: NvidiaTeslaT4`. The official CLI also
+  supports `kaggle kernels push --accelerator NvidiaTeslaT4`
+- Each invocation uses the unchanged full optimizer schedule and existing
+  step/time checkpoint policy. After the first newly sealed full checkpoint, or
+  after forcing a save at the segment cap, the run stops cleanly. If training
+  remains, `run_status.json` says `paused` and records the step, checkpoint and
+  run-manifest hashes; no final model, final metrics or false `completed`
+  status is emitted. A local `--resume` must use the same original config,
+  source, data, environment and hardware identity
+- Before training, the Kaggle invocation counts all files under
+  `/kaggle/working` and reserves space for one full checkpoint, final model,
+  and a 1 GiB margin under a 20,000,000,000-byte cap. It also checks available
+  filesystem space, then checks actual output size after the checkpoint. It
+  fails closed if these checks do not pass; it never prunes unsynced checkpoints
 - `--dataset-license` is required and offers `unknown`, `copyright-authors`, or
   `other` (the last also requires a description). No CC0 license or public
   visibility is chosen implicitly
@@ -62,7 +76,8 @@ matches the selected snapshot, build both local packages:
   --data-output /tmp/picoagent-input-dataset \
   --dataset-manifest data/native-training-plans-v1/manifest.json \
   --dataset-license copyright-authors \
-  --chunk-bytes 16777216
+  --chunk-bytes 16777216 \
+  --segment-steps 100
 ```
 
 Inspect `kernel-package-receipt.json`, `package-receipt.json`, the manifest
@@ -83,7 +98,7 @@ status in Kaggle before pushing the private kernel package:
 
 ```sh
 kaggle datasets status KAGGLE_OWNER/picoagent-native-input
-kaggle kernels push -p /tmp/picoagent-kernel-package
+kaggle kernels push -p /tmp/picoagent-kernel-package --accelerator NvidiaTeslaT4
 ```
 
 These provider commands are documentation only and were not run while preparing
@@ -91,16 +106,24 @@ this change. See the [official Kaggle CLI dataset command reference](https://git
 for private-by-default creation and the [official dataset metadata reference](https://github.com/Kaggle/kaggle-cli/blob/main/docs/datasets_metadata.md)
 for supported licenses, including `unknown`, `copyright-authors`, and `other`.
 
-## Long-run checkpoint readiness blocker
+## Long-run checkpoint readiness
 
-The local package is **not launch-ready for a long training run**. Its generated
-kernel waits synchronously for `picoagent.training train` to finish, and only
-then writes `job_status.json`. It does not stream or copy verified checkpoints
-off the Kaggle runtime, restart training, or collect checkpoints during a run.
+Bounded pause and resume are now implemented in the local trainer and package
+builder, but Kaggle execution is **not yet provider-validated**. CPU integration
+tests compare uninterrupted training against two mid-epoch segments: the first
+segment pauses without final artifacts, and resumed final tensors and scheduler
+state exactly match the uninterrupted run. A separate CPU case verifies that an
+earlier wall-clock checkpoint pauses before the segment cap. These local tests
+do not establish Kaggle runtime capacity, output durability, or GPU resume.
+
 The training configuration saves at 100 steps and at approximately 600-second
-intervals; Hugging Face `TrainingArguments` currently sets
-`save_total_limit=None`, so every full-state checkpoint is retained. Do not
-work around the space problem by deleting unsynchronized checkpoints.
+intervals; Hugging Face `TrainingArguments` keeps `save_total_limit=None`. A
+segmented invocation stops on the first normal step/time save, or forces one at
+its optimizer-step cap, so it creates just one new full checkpoint and keeps
+any restored checkpoint. Do not work around the space problem by deleting
+unsynchronized checkpoints. After each completed Kaggle invocation, the parent
+operator must retrieve and independently verify its saved output before
+preparing any later resume; this package does not copy checkpoints off-runtime.
 
 This is especially risky for the current full-precision 360M-parameter run.
 Model weights alone are approximately 1.44 GB (360 million FP32 parameters),
@@ -121,27 +144,26 @@ The [official Kaggle CLI kernel reference](https://github.com/Kaggle/kaggle-cli/
 documents `kernels output` as retrieving output from the latest run and
 `kernels status` as reporting whether it is running, completed, or failed. It
 does not document a guarantee that checkpoint files are downloadable while a
-run is active. Therefore assume that a running kernel may be interrupted before
-its checkpoint output can be retrieved; successful final output retrieval is
-not a recovery plan.
+run is active. The segment design avoids depending on live retrieval: a
+successful segment exits cleanly after a sealed checkpoint so the kernel's
+`/kaggle/working` output can be collected. An interrupted run before that point
+can still lose its in-progress segment.
 
-Before a long run, one of these recovery paths needs separate design and
-verification:
+Before a production run, a short, approved provider pilot must verify actual
+free-space behavior, checkpoint/output visibility after a clean paused exit,
+and exact T4 environment/hardware identity. The first GPU invocation should be
+native SFT (no separate GPU smoke); local package tests do not prove provider
+side behavior. One further operational gap remains: the builder currently
+packages the initial segment, but does not automatically attach a previously
+retrieved checkpoint to a later kernel version. The next segment must be
+prepared only after the prior output is downloaded and independently verified,
+with the original run manifest and latest full checkpoint restored intact.
 
-1. A short, approved provider pilot must measure actual save size, free-space
-   behavior, session limit, output visibility after success and failure, and
-   whether any supported path can collect a completed checkpoint before the
-   kernel exits. Do not infer these facts from local packaging tests.
-2. The production runner must gain a bounded checkpoint handoff: either a
-   supported off-runtime transfer that verifies the complete checkpoint and
-   run-manifest hashes before the next save, or deliberately segmented kernel
-   runs that end with a verified resumable checkpoint and resume only from a
-   separately retrieved and verified artifact. This needs an end-to-end resume
-   test and explicit storage/retention policy. The current builder implements
-   neither path.
+The segment cap must be short enough to reach a checkpoint before Kaggle's
+session limit. Output-budget checks estimate a checkpoint from parameter count
+and reserve final export space; actual checkpoint and runtime size still need
+measuring. If a checkpoint plus restored state and source/data cannot fit under
+the bounded cap, fail rather than prune an unsynced checkpoint.
 
-Until that work is complete, treat this package as a verified input/code
-staging prototype only. Do not launch a long training job, claim a checkpoint
-is durable, or claim it can recover from a Kaggle timeout, runtime loss, output
-quota, or failed kernel. No Kaggle provider action or checkpoint pilot has been
-performed as part of this local review.
+No Kaggle upload, kernel submission, or provider-side checkpoint pilot has
+been performed in this local review.

@@ -24,6 +24,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     train = commands.add_parser("train", help="Run full SFT or distinctly labeled QLoRA on your already configured machine")
     train.add_argument("--config", required=True)
     train.add_argument("--resume", default=None, help="Verified checkpoint in the original run directory; immutable config must match")
+    train.add_argument("--segment-steps", type=int, help="Operational maximum optimizer updates before a sealed-checkpoint pause; does not alter the configured full-run schedule")
+    train.add_argument("--output-budget-bytes", type=int, help="Fail-closed bound for current outputs plus one checkpoint, final model, and margin; requires --segment-steps")
+    train.add_argument("--output-budget-root", help="Directory whose complete saved-output tree is included in --output-budget-bytes")
     smoke = commands.add_parser("smoke", help="Optional offline CPU random-model pipeline check; not agent evaluation")
     smoke.add_argument("--output-dir", required=True)
     smoke.add_argument("--device", choices=("cpu", "cuda", "xla"), default="cpu")
@@ -37,7 +40,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         result = {"verified": True, "records": {split: len(records) for split, records in rows.items()}, "lockbox_used": False}
     elif args.command == "train":
         from .train import run_training
-        result = run_training(TrainingConfig.load(args.config), resume_from_checkpoint=args.resume)
+        result = run_training(TrainingConfig.load(args.config), resume_from_checkpoint=args.resume,
+                              segment_steps=args.segment_steps, output_budget_bytes=args.output_budget_bytes,
+                              output_budget_root=args.output_budget_root)
     else:
         from .smoke import run_smoke
         result = run_smoke(args.output_dir, device=args.device)

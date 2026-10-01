@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import shutil
 from pathlib import Path
@@ -25,13 +26,79 @@ def _snapshot_code(output: Path, evidence: dict[str, Any]) -> None:
         shutil.copyfile(source, target)
 
 
-def run_training(config: TrainingConfig, *, resume_from_checkpoint: str | None = None) -> dict[str, Any]:
+def _tree_bytes(root: Path) -> int:
+    total = 0
+    for path in root.rglob("*"):
+        if path.is_symlink():
+            raise ValueError(f"Output tree contains a symlink; refusing bounded-space accounting: {path}")
+        if path.is_file():
+            total += path.stat().st_size
+    return total
+
+
+def _output_budget_reservation(output: Path, *, parameters: int, budget_bytes: int,
+                              budget_root: Path | None = None) -> dict[str, int]:
+    """Conservatively reserve room for the next full checkpoint and final model.
+
+    For full SFT, one full checkpoint needs FP32 model weights and Adam's two
+    FP32 moment tensors. A 3.25x parameter-byte estimate plus a 512 MiB margin
+    covers checkpoint metadata and serialization overhead; a separate model
+    copy is reserved for final export. This is a preflight, not a promise about
+    provider quota accounting.
+    """
+    if type(budget_bytes) is not int or budget_bytes <= 0:
+        raise ValueError("output_budget_bytes must be a positive integer")
+    parameter_bytes = parameters * 4
+    checkpoint_reserve = math.ceil(parameter_bytes * 3.25) + 512 * 1024 * 1024
+    final_model_reserve = parameter_bytes
+    margin = 1024 * 1024 * 1024
+    counted_root = (budget_root or output).resolve(strict=True)
+    output = output.resolve(strict=True)
+    if output != counted_root and not output.is_relative_to(counted_root):
+        raise ValueError("output budget root must contain the training output directory")
+    existing_bytes = _tree_bytes(counted_root)
+    projected = existing_bytes + checkpoint_reserve + final_model_reserve + margin
+    if projected > budget_bytes:
+        raise OSError(
+            "Insufficient bounded output budget for restored/current artifacts, "
+            "one full checkpoint, final model export, and safety margin "
+            f"({existing_bytes}+{checkpoint_reserve}+{final_model_reserve}+{margin} > {budget_bytes} bytes)"
+        )
+    free_bytes = shutil.disk_usage(counted_root).free
+    needed_free = checkpoint_reserve + final_model_reserve + margin
+    if free_bytes < needed_free:
+        raise OSError(
+            "Insufficient filesystem free space for one full checkpoint, "
+            f"final model export, and safety margin ({free_bytes} < {needed_free} bytes)"
+        )
+    return {"existing_output_bytes": existing_bytes, "checkpoint_reserve_bytes": checkpoint_reserve,
+            "final_model_reserve_bytes": final_model_reserve, "safety_margin_bytes": margin,
+            "projected_output_bytes": projected, "output_budget_bytes": budget_bytes,
+            "filesystem_free_bytes": free_bytes}
+
+
+def run_training(config: TrainingConfig, *, resume_from_checkpoint: str | None = None,
+                 segment_steps: int | None = None, output_budget_bytes: int | None = None,
+                 output_budget_root: str | None = None) -> dict[str, Any]:
     """Train locally. Never launch/lease a GPU, push a model, or evaluate a benchmark.
 
     Full mode updates every parameter using FP32 master weights plus CUDA BF16/
     FP16 autocast. This reduces activation precision, not Adam-state storage.
     QLoRA freezes a 4-bit base and trains adapters; it is never reported as full SFT.
+
+    ``segment_steps`` is an operational stop boundary, not part of the
+    immutable TrainingConfig or optimizer schedule. Each segment stops only
+    after a full checkpoint has been sealed. The same config and runtime
+    identity are required to resume the next segment.
     """
+    if segment_steps is not None and (type(segment_steps) is not int or segment_steps <= 0):
+        raise ValueError("segment_steps must be a positive integer when supplied")
+    if output_budget_bytes is not None and segment_steps is None:
+        raise ValueError("output_budget_bytes requires an explicit segmented run")
+    if output_budget_bytes is not None and (type(output_budget_bytes) is not int or output_budget_bytes <= 0):
+        raise ValueError("output_budget_bytes must be a positive integer")
+    if output_budget_root is not None and output_budget_bytes is None:
+        raise ValueError("output_budget_root requires output_budget_bytes")
     if int(os.environ.get("WORLD_SIZE", "1")) != 1:
         raise ValueError("This audited baseline supports one process/device; distributed training requires a separately validated config")
     initial_manifest_hash = sha256_file(config.dataset_manifest)
@@ -190,13 +257,25 @@ def run_training(config: TrainingConfig, *, resume_from_checkpoint: str | None =
     class AuditCheckpoint(TrainerCallback):
         def __init__(self):
             self.timer = CheckpointTimer(config.checkpoint_interval_seconds)
+            self.start_step: int | None = None
+            self.boundary_step: int | None = None
+            self.segment_checkpoint: str | None = None
 
         def on_train_begin(self, args: Any, state: Any, control: Any, **kwargs: Any) -> Any:
+            self.start_step = state.global_step
+            if segment_steps is not None:
+                self.boundary_step = min(state.max_steps, state.global_step + segment_steps)
             self.timer.mark_saved()
             return control
 
         def on_step_end(self, args: Any, state: Any, control: Any, **kwargs: Any) -> Any:
+            if self.boundary_step is not None and state.global_step >= self.boundary_step:
+                control.should_save = True
+                control.should_training_stop = True
+                return control
             # HF calls this after a completed optimizer step, never mid-update.
+            # Keep the configured wall-clock checkpoint policy active in a
+            # segment; the first such save is sealed and pauses in on_save.
             if self.timer.due():
                 control.should_save = True
                 control.should_evaluate = True
@@ -204,10 +283,18 @@ def run_training(config: TrainingConfig, *, resume_from_checkpoint: str | None =
 
         def on_save(self, args: Any, state: Any, control: Any, **kwargs: Any) -> Any:
             if state.is_world_process_zero:
-                checkpoint_evidence(output / f"checkpoint-{state.global_step}", run_manifest_hash)
+                checkpoint = output / f"checkpoint-{state.global_step}"
+                checkpoint_evidence(checkpoint, run_manifest_hash)
+                if segment_steps is not None:
+                    self.segment_checkpoint = checkpoint.name
+                    # Trainer reaches this callback only after weights,
+                    # optimizer, scheduler, RNG, and trainer state are saved.
+                    control.should_training_stop = True
             self.timer.mark_saved()
             return control
 
+    # The global step/epoch target is still calculated from the original
+    # config. Segmentation changes only where this invocation pauses and saves.
     arguments = TrainingArguments(
         output_dir=str(output), per_device_train_batch_size=config.per_device_batch_size,
         per_device_eval_batch_size=config.per_device_batch_size,
@@ -233,14 +320,66 @@ def run_training(config: TrainingConfig, *, resume_from_checkpoint: str | None =
                 return torch.autocast("xla", dtype=torch.bfloat16)
             return super().compute_loss_context_manager()
 
+    checkpoint_callback = AuditCheckpoint()
     trainer = AuditedTrainer(model=model, args=arguments, train_dataset=train_data, eval_dataset=dev_data,
                       processing_class=tokenizer, data_collator=AssistantOnlyCollator(tokenizer.pad_token_id, pad_to_length=config.max_seq_length if device == "xla" else None),
-                      callbacks=[AuditCheckpoint()])
+                      callbacks=[checkpoint_callback])
     if trainer.args.device.type != device:
         raise RuntimeError(f"Trainer selected {trainer.args.device}, expected {device}; refusing silent backend fallback")
-    write_json(output / "run_status.json", {"status": "running", "started_at": now_utc(), "resume_from": resume_from_checkpoint})
+    space = None
+    if output_budget_bytes is not None:
+        space = _output_budget_reservation(output, parameters=total_parameters, budget_bytes=output_budget_bytes,
+                                           budget_root=Path(output_budget_root) if output_budget_root else None)
+    before_checkpoints = {path.name for path in output.glob("checkpoint-[0-9]*") if path.is_dir()}
+    write_json(output / "run_status.json", {
+        "status": "running", "started_at": now_utc(), "resume_from": resume_from_checkpoint,
+        "segment_limit_optimizer_steps": segment_steps, "output_space_preflight": space,
+    })
     try:
         result = trainer.train(resume_from_checkpoint=resume_from_checkpoint)
+        if segment_steps is not None:
+            global_step = trainer.state.global_step
+            planned_steps = trainer.state.max_steps
+            if global_step < planned_steps:
+                if checkpoint_callback.segment_checkpoint is None:
+                    raise RuntimeError("Segment ended without a newly sealed checkpoint")
+                checkpoint = output / checkpoint_callback.segment_checkpoint
+                if int(checkpoint.name.split("-")[1]) != global_step:
+                    raise RuntimeError("Paused segment step differs from its sealed checkpoint")
+                added_checkpoints = {path.name for path in output.glob("checkpoint-[0-9]*") if path.is_dir()} - before_checkpoints
+                if added_checkpoints != {checkpoint.name}:
+                    raise RuntimeError(f"Segment must add exactly one checkpoint; added {sorted(added_checkpoints)}")
+                verify_checkpoint(checkpoint, run_manifest_hash)
+                checkpoint_manifest_sha256 = sha256_file(checkpoint / "checkpoint_manifest.json")
+                actual_output_bytes = None
+                if space is not None:
+                    counted_root = Path(output_budget_root).resolve(strict=True) if output_budget_root else output
+                    actual_output_bytes = _tree_bytes(counted_root)
+                    needed_after_pause = actual_output_bytes + space["final_model_reserve_bytes"] + space["safety_margin_bytes"]
+                    if needed_after_pause > output_budget_bytes:
+                        raise OSError(
+                            "Sealed checkpoint exceeded the bounded output budget with final-model reserve "
+                            f"({needed_after_pause} > {output_budget_bytes} bytes)"
+                        )
+                status = {
+                    "status": "paused", "paused_at": now_utc(), "global_step": global_step,
+                    "planned_global_steps": planned_steps, "checkpoint": checkpoint.name,
+                    "checkpoint_manifest_sha256": checkpoint_manifest_sha256,
+                    "run_manifest_sha256": run_manifest_hash,
+                    "resume_from": resume_from_checkpoint,
+                    "segment_start_step": checkpoint_callback.start_step,
+                    "segment_max_end_step": checkpoint_callback.boundary_step,
+                    "segment_limit_optimizer_steps": segment_steps,
+                    "output_space_preflight": space,
+                    "observed_output_bytes": actual_output_bytes,
+                    "note": "Paused at a complete sealed checkpoint; the frozen training schedule is not complete.",
+                }
+                write_json(output / "run_status.json", status)
+                return {"output_dir": str(output), "status": "paused", "global_step": global_step,
+                        "planned_global_steps": planned_steps, "checkpoint": str(checkpoint),
+                        "checkpoint_manifest_sha256": checkpoint_manifest_sha256,
+                        "training_mode": config.training_mode, "device": device,
+                        "smoke_only": config.smoke_test}
         metrics = {"training": result.metrics, "development": trainer.evaluate(), "benchmark": None}
         final_dir = output / ("final-model" if config.training_mode == "full" else "final-adapter")
         model.config.use_cache = True
@@ -254,9 +393,20 @@ def run_training(config: TrainingConfig, *, resume_from_checkpoint: str | None =
         }, exclusive=True)
         write_json(output / "metrics.json", metrics)
         write_json(output / "final_artifacts.json", {"path": final_dir.name, "files": tree_hashes(final_dir)}, exclusive=True)
+        actual_output_bytes = None
+        if space is not None:
+            counted_root = Path(output_budget_root).resolve(strict=True) if output_budget_root else output
+            actual_output_bytes = _tree_bytes(counted_root)
+            if actual_output_bytes > output_budget_bytes:
+                raise OSError(f"Completed output exceeds the configured bounded output budget ({actual_output_bytes} > {output_budget_bytes} bytes)")
         write_json(output / "run_status.json", {"status": "completed", "finished_at": now_utc(), "global_step": trainer.state.global_step,
-                   "mode": config.training_mode, "smoke_only": config.smoke_test, "artifact": str(final_dir), "benchmark_evaluation": "not_run"})
-        return {"output_dir": str(output), "artifact": str(final_dir), "training_mode": config.training_mode,
+                   "planned_global_steps": trainer.state.max_steps, "mode": config.training_mode,
+                   "smoke_only": config.smoke_test, "artifact": str(final_dir), "benchmark_evaluation": "not_run",
+                   "segment_limit_optimizer_steps": segment_steps, "output_space_preflight": space,
+                   "observed_output_bytes": actual_output_bytes})
+        return {"output_dir": str(output), "artifact": str(final_dir), "status": "completed",
+                "global_step": trainer.state.global_step, "planned_global_steps": trainer.state.max_steps,
+                "training_mode": config.training_mode,
                 "precision": precision, "device": device, "trainable_parameters": trainable_parameters, "metrics": metrics, "smoke_only": config.smoke_test}
     except BaseException as exc:
         write_json(output / "run_status.json", {"status": "failed", "finished_at": now_utc(), "error_type": type(exc).__name__, "error": str(exc)})

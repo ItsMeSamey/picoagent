@@ -1,0 +1,32 @@
+{
+  "schema": "picoagent.compute_attempt.v1",
+  "date_utc": "2026-10-01",
+  "source_commit": "9be3c0415822bb6a72f9b7d41b2792b60e167c2e",
+  "session": "picoagent-native-t4-v1",
+  "hardware_probe": {
+    "passed": true,
+    "python": "3.13.15",
+    "torch": "2.11.0+cu128",
+    "gpu": "Tesla T4",
+    "vram_bytes": 15637086208,
+    "disk_free_bytes": 70051975168
+  },
+  "source_archive_sha256": "e63d94892488014cebbcf24a01183d44aef1c6300e40ffe2f846d668963a9f42",
+  "source_archive_bytes": 746035846,
+  "chunks_total": 23,
+  "chunks_verified_before_transport_failure": 1,
+  "staging_completed": false,
+  "training_started": false,
+  "optimizer_steps": 0,
+  "separate_accelerator_smoke_run": false,
+  "failure_classes": [
+    "WebSocketConnectionClosedException",
+    "AttributeError in websocket connection initialization during cleanup"
+  ],
+  "recovery_attempt": "single persistent connection with existing official CLI authentication; failed before upload continuation",
+  "runtime_stop_confirmed": true,
+  "sessions_after_stop": "no active sessions reported",
+  "usage_endpoint_after_stop": "temporarily still reported one assignment; not treated as fresh proof of active compute",
+  "all_source_and_data_preserved_locally_and_in_private_repository": true,
+  "security_changes": false
+}

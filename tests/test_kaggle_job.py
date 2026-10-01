@@ -81,10 +81,12 @@ def test_private_input_dataset_is_chunked_pinned_and_not_embedded(tmp_path):
         root, kernel, "kernel-owner", "picoagent-native-sft", "configs/native.json",
         input_dataset="dataset-owner/native-private-bundle", data_output=dataset,
         dataset_manifest="data/native/manifest.json", dataset_license="unknown", chunk_bytes=128,
+        segment_steps=5,
     )
     metadata = json.loads((kernel / "kernel-metadata.json").read_text())
     assert metadata["is_private"] is True
     assert metadata["dataset_sources"] == ["dataset-owner/native-private-bundle"]
+    assert metadata["machine_shape"] == "NvidiaTeslaT4"
     program = (kernel / "main.py").read_text()
     compile(program, "main.py", "exec")
     assert len(program.encode()) < 100_000
@@ -94,9 +96,14 @@ def test_private_input_dataset_is_chunked_pinned_and_not_embedded(tmp_path):
     assert "extract_source_archive" in program
     assert "native_sft_only" in program
     assert "smoke_test" not in program
+    assert '"--segment-steps", \'5\'' in program
+    assert '"--output-budget-bytes", \'20000000000\'' in program
     kernel_receipt = json.loads((kernel / "kernel-package-receipt.json").read_text())
     assert kernel_receipt["kernel_main_sha256"] == hashlib.sha256(program.encode()).hexdigest()
     assert kernel_receipt["staging_helper_sha256"] in program
+    assert kernel_receipt["segment_steps"] == 5
+    assert kernel_receipt["output_budget_bytes"] == module.KAGGLE_OUTPUT_BUDGET_BYTES
+    assert kernel_receipt["requested_accelerator"] == "NvidiaTeslaT4"
 
     transfer_path = dataset / "transfer_manifest.json"
     transfer_raw = transfer_path.read_bytes()
@@ -146,11 +153,15 @@ def test_private_dataset_needs_explicit_native_sft_and_license(tmp_path):
     with pytest.raises(ValueError, match="allow native_teacher_observed"):
         module.build(root, tmp_path / "kernel", "owner", "kernel", "configs/native.json",
                      input_dataset="owner/private-data", data_output=tmp_path / "dataset",
-                     dataset_manifest="data/native/manifest.json", dataset_license="unknown")
+                     dataset_manifest="data/native/manifest.json", dataset_license="unknown", segment_steps=5)
     root = source(tmp_path / "missing-opt-in", native_opt_in=True)
     with pytest.raises(ValueError, match="requires --data-output"):
         module.build(root, tmp_path / "kernel-2", "owner", "kernel-2", "configs/native.json",
                      input_dataset="owner/private-data", dataset_manifest="data/native/manifest.json")
+    with pytest.raises(ValueError, match="requires a positive --segment-steps"):
+        module.build(root, tmp_path / "kernel-3", "owner", "kernel-3", "configs/native.json",
+                     input_dataset="owner/private-data", data_output=tmp_path / "dataset-3",
+                     dataset_manifest="data/native/manifest.json", dataset_license="unknown")
     with pytest.raises(ValueError, match="'other' license requires"):
         module._dataset_metadata("owner/private-data", "private-data", "other", None)
 
@@ -227,4 +238,4 @@ def test_builder_rejects_existing_destination_and_unsafe_dataset_handle(tmp_path
     with pytest.raises(ValueError, match="simple Kaggle identifier"):
         module.build(root, tmp_path / "bad-handle", "owner", "bad", "configs/native.json",
                      input_dataset="../private", data_output=tmp_path / "dataset",
-                     dataset_manifest="data/native/manifest.json", dataset_license="unknown")
+                     dataset_manifest="data/native/manifest.json", dataset_license="unknown", segment_steps=5)
