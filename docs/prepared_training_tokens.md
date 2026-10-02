@@ -143,3 +143,26 @@ model. A failed or partial download is not a resumable backup.
 The prepared loader was measured locally at 34.33 seconds including imports and
 config loading, versus 669.1 seconds of recorded raw preparation. These are CPU
 measurements with host/cache differences, not a guaranteed Colab speedup.
+
+## Durable v3 source refresh
+
+The durability fixes changed five non-encoding core modules, so the conservative
+whole-core identity correctly rejected prepared v2 before model loading. A fresh
+CPU rebuild using the exact original reviewed tokenizer bytes produced
+`data/prepared-native-training-plans-v3/manifest.json`. Separate independent
+decoding verified all 49,905 ordered examples and every input/attention/label
+array against the original raw profile; all 83 payload files are byte-identical
+to v2. Only the root manifest's core-source map changed. See the
+[exact digest approval](validation/20261002-prepared-v3-approval.json).
+
+The current durable v3 training config pins that approved v3 artifact. Before
+allocating an accelerator, run the complete production token loader on CPU:
+
+```sh
+python scripts/validate_prepared_run.py \
+  --config configs/smol360m_native_t4_prepared_v3_durable.json
+```
+
+The default regression suite also checks the current config's approved digest,
+complete core-source map and every artifact payload. Future source edits must
+pass this check before launch; no stale-source bypass is provided.

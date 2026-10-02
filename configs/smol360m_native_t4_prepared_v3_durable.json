@@ -23,8 +23,8 @@
   "checkpoint_interval_seconds": 600.0,
   "allow_native_teacher_observed": true,
   "allow_artificial_action_plans": true,
-  "prepared_manifest": "data/prepared-native-training-plans-v2/manifest.json",
-  "prepared_manifest_sha256": "6dcd339eb9b25ea8edb2ad625b8988cf67baa814614407d983a8c5b0734945a6",
+  "prepared_manifest": "data/prepared-native-training-plans-v3/manifest.json",
+  "prepared_manifest_sha256": "9612db32062a7d90206d85f79b4de99836936f820626d81aef3da466178867c1",
   "checkpoint_before_eval": true,
   "eval_steps": 500
 }

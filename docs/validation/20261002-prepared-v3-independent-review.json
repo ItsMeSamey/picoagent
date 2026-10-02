@@ -1,0 +1,70 @@
+{
+  "all_payload_files_byte_identical": true,
+  "audit_script_sha256": "641bc0967f593d85b6ad1ae78cf2a5931062276982f73256de97a719784667e3",
+  "audited_at": "2026-10-02T07:10:41.252602+00:00",
+  "candidate": {
+    "path": "data/prepared-native-training-plans-v2/manifest.json",
+    "sha256": "6dcd339eb9b25ea8edb2ad625b8988cf67baa814614407d983a8c5b0734945a6",
+    "streams": {
+      "dev": {
+        "assistant_tokens": 225408,
+        "encoded_stream_sha256": "241a1ca9c75346615f15d92d42bb3d53faed79c0fbc6d7e49671f4d7471b8474",
+        "examples": 1203,
+        "maximum_length": 3445,
+        "source_rows": 221,
+        "total_tokens": 2051093
+      },
+      "train": {
+        "assistant_tokens": 5921213,
+        "encoded_stream_sha256": "9259dedf88dbaafb0dd3dae5ff8768cf7d548881fa349a0eb2e342486fc7426d",
+        "examples": 48702,
+        "maximum_length": 3436,
+        "source_rows": 20326,
+        "total_tokens": 51878294
+      }
+    }
+  },
+  "hardened_rebuild": {
+    "path": "data/prepared-native-training-plans-v3/manifest.json",
+    "sha256": "9612db32062a7d90206d85f79b4de99836936f820626d81aef3da466178867c1",
+    "streams": {
+      "dev": {
+        "assistant_tokens": 225408,
+        "encoded_stream_sha256": "241a1ca9c75346615f15d92d42bb3d53faed79c0fbc6d7e49671f4d7471b8474",
+        "examples": 1203,
+        "maximum_length": 3445,
+        "source_rows": 221,
+        "total_tokens": 2051093
+      },
+      "train": {
+        "assistant_tokens": 5921213,
+        "encoded_stream_sha256": "9259dedf88dbaafb0dd3dae5ff8768cf7d548881fa349a0eb2e342486fc7426d",
+        "examples": 48702,
+        "maximum_length": 3436,
+        "source_rows": 20326,
+        "total_tokens": 51878294
+      }
+    }
+  },
+  "independent_decoder": "stdlib.array little-endian int32; no prepared module imports",
+  "interpretation": "Complete ordered token/attention/assistant-label streams match independently recorded raw production encoding. A separate source/data review and exact digest approval remain required; this report cannot approve itself.",
+  "payload_bytes": 25060691,
+  "payload_files": 83,
+  "production_approval_granted": false,
+  "raw_profile": {
+    "path": "docs/validation/20261001-cpu-preparation-profile.json",
+    "sha256": "7e1f095732d432a50381af4f99ea5d26df5f1a9e8c1818bfda136c5ef02728a5",
+    "source_hashes": {
+      "picoagent.data.artificial_plans": "379533922eae9ebbef686bfbe0b7148190b422fe0458a2aec9ab8c75d215bf3f",
+      "picoagent.data.audit": "aa959b3922e2b2070f154411bf73723c6020cfb79ba7f3f93e28ed943764b0bf",
+      "picoagent.data.native_admission": "f988afb807887109275e106b9b0da9f3fd407c69ebb45e60a451918960bd3325",
+      "picoagent.data.native_collection": "c28532470a56783f3c992ecd85572d0aa0fd60d4e2b8b60a4ee6aa228762727b",
+      "picoagent.data.native_storage": "2a801c7fbaf69f528288a27f35e0a8d2e32dda0b2802f6aed3cd7c02fc5bef92",
+      "picoagent.data.schema": "ea740b1f984cd8c353e64d56e0f0c5f990a83a771e52e4562b6eda0ecfe45970",
+      "picoagent.training.data": "292a021eacc7668591f95729100f9fe80a9cfef8ca21401646a43d453454e869",
+      "picoagent.training.encoding": "4a1a147335b689c025286d053434c7147f61244e0920569cf1cb85ba59255cb7"
+    },
+    "source_manifest_sha256": "e5774693bc42815ab44858754303b3970c7e34f26a1140425dccdd5853ccfbd9"
+  },
+  "schema": "picoagent.prepared_tokens.independent_equivalence.v1"
+}

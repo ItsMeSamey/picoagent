@@ -1,0 +1,26 @@
+{
+  "schema": "picoagent.prepared_tokens.review_approval.v1",
+  "date_utc": "2026-10-02",
+  "status": "approved_for_separately_named_new_run",
+  "prepared_manifest": "data/prepared-native-training-plans-v3/manifest.json",
+  "prepared_manifest_sha256": "9612db32062a7d90206d85f79b4de99836936f820626d81aef3da466178867c1",
+  "raw_source_manifest_sha256": "e5774693bc42815ab44858754303b3970c7e34f26a1140425dccdd5853ccfbd9",
+  "build_core_commit": "1a7a8ef4bef26c376afd3ae9f78e8dd5d30420e2",
+  "core_python_files": 46,
+  "core_source_map_sha256": "94b7df1e4571b935c3d7c44fdca235ac5d2f4c61d009b299dce9b5429a53aa36",
+  "independent_review_report": "docs/validation/20261002-prepared-v3-independent-review.json",
+  "independent_review_sha256": "85c5d9105f4e3c751680836d526496034b44f78619c02d1ac4da6fd22a143fab",
+  "review_basis": [
+    "Fresh raw CPU rebuild using exact original reviewed tokenizer bytes",
+    "Independent stdlib decoder matches all 49,905 ordered input/attention/assistant-label arrays to original raw profile",
+    "All 83payload files byte-identical to approvedv2",
+    "All 528raw inventory file hashes and 8raw-reference implementation hashes verified",
+    "All 46core source hashes verified; only conservative transform.source identity changes; all remaining manifest fields identical to v2"
+  ],
+  "new_config": "configs/smol360m_native_t4_prepared_v3_durable.json",
+  "limitations": [
+    "Data admission only, not evidence of model quality",
+    "Earlier zero-step production attempt failed closed before model loading; no checkpoint identity retrofitted",
+    "Original artifacts retained; production identity checks unchanged"
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "date_utc": "2026-10-02",
+  "manifest_sha256": "9612db32062a7d90206d85f79b4de99836936f820626d81aef3da466178867c1",
+  "exact_production_cpu_loader_passed": true,
+  "regression_caught_original_stale_source_pin": true,
+  "tests_passed": 617,
+  "tests_skipped": 26,
+  "subtests_passed": 44,
+  "seconds": 62.76,
+  "ruff_passed": true,
+  "accelerator_allocated_for_tests": false
+}

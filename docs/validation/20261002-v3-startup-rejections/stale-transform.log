@@ -1,0 +1,22 @@
+Traceback (most recent call last):
+  File "<frozen runpy>", line 203, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/content/picoagent/src/picoagent/training/__main__.py", line 73, in <module>
+    raise SystemExit(main())
+                     ~~~~^^
+  File "/content/picoagent/src/picoagent/training/__main__.py", line 59, in main
+    result = run_training(TrainingConfig.load(args.config), resume_from_checkpoint=args.resume,
+                          segment_steps=args.segment_steps, output_budget_bytes=args.output_budget_bytes,
+    ...<2 lines>...
+                          durability_timeout_seconds=args.durability_timeout_seconds,
+                          finalize_only=args.finalize_only)
+  File "/content/picoagent/src/picoagent/training/train.py", line 139, in run_training
+    prepared = load_prepared_dataset(config)
+  File "/content/picoagent/src/picoagent/training/prepared.py", line 427, in load_prepared_dataset
+    return _load(config, require_approval=True)
+  File "/content/picoagent/src/picoagent/training/prepared.py", line 470, in _load
+    _need(manifest.get("transform") == _identity(), "prepared encoder or package identity changed")
+    ~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/content/picoagent/src/picoagent/training/prepared.py", line 39, in _need
+    raise ValueError(message)
+ValueError: prepared encoder or package identity changed

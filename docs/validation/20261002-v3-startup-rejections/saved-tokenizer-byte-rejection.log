@@ -1,0 +1,14 @@
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/workspace/scratch/443c242dcc32/picoagent/src/picoagent/training/__main__.py", line 73, in <module>
+    raise SystemExit(main())
+                     ^^^^^^
+  File "/workspace/scratch/443c242dcc32/picoagent/src/picoagent/training/__main__.py", line 48, in main
+    path = build_prepared_dataset(TrainingConfig.load(args.config), args.output_dir,
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/scratch/443c242dcc32/picoagent/src/picoagent/training/prepared.py", line 278, in build_prepared_dataset
+    validate_note_tokenizer(
+  File "/workspace/scratch/443c242dcc32/picoagent/src/picoagent/data/artificial_plans.py", line 121, in validate_note_tokenizer
+    raise ValueError("actual training tokenizer differs from the reviewed action-plan tokenizer")
+ValueError: actual training tokenizer differs from the reviewed action-plan tokenizer
