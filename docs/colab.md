@@ -131,3 +131,53 @@ python -m pytest tests/test_checkpoint_sync.py tests/test_training_retention.py 
 Fake files/processes cover interrupted upload/download, restart reuse of verified chunks, checksum corruption, manifest path traversal, conflicting run identity, sealed resumable states, retained best/latest checkpoints, source-secret exclusions, and explicit session targeting. These tests do not contact Colab or validate actual storage durability.
 
 For bounded storage on the off-runtime controller, see [reviewed archive retention](checkpoint_workflow.md). Runtime-only pruning does not bound the controller archive.
+
+## Public-release durability barrier
+
+For a trainer configured with the public-backup durability barrier, keep an
+independent controller running with both publication flags:
+
+```bash
+PYTHONPATH=src:scripts python scripts/colab_sdk_watch.py \
+  --session EXISTING_SESSION --run-dir /content/picoagent/runs/RUN \
+  --destination /durable/controller/RUN --off-runtime \
+  --publish-repository OWNER/REPO --approve-public-checkpoints
+```
+
+`colab_run.py collect` and `colab_run.py watch` support the same flags. The
+approval flag authorizes public disclosure of the complete verified checkpoint
+(model, optimizer, scheduler, RNG and trainer state), pinned run metadata and
+source snapshot to the named repository. Review this scope before enabling it;
+GitHub authentication belongs on the controller, never on the training runtime.
+Without publication flags the existing off-runtime collection behavior remains
+unchanged and no trainer durability acknowledgement is created.
+
+The controller first completes the normal SHA256-verified download. It plans
+publication against the exact retained transfer manifest under
+`.incoming/checkpoint-N/BUNDLE_SHA256/transfer_manifest.json`, rather than
+repacking a potentially different archive. It saves `plan.json` and then the
+verified published `receipt.json` under
+`release-backups/checkpoint-N/BUNDLE_SHA256/` on the controller before atomically
+writing `RUN/durability/checkpoint-N.json` on the runtime. Acknowledgement is
+independent of `--prune`; this example does not request pruning.
+
+Upload, public readback, identity or persistence failures stop collection
+without acknowledging that checkpoint. Restart the same command to reuse exact
+verified chunks and matching release assets. Published releases are reverified
+before acknowledgement; a saved receipt alone never skips verification. Within
+one running controller, a confirmed acknowledgement can skip repeated public
+readback only while the exact plan, preserved receipt and current remote
+acknowledgement hash still match. A controller restart or missing acknowledgement
+forces release re-verification. No
+release, tag or asset is clobbered or deleted. Keep the controller destination
+on persistent storage and retain its plan and receipt for restoration. The SDK
+watcher also performs a final collection after seeing terminal trainer status.
+
+Enable `checkpoint_before_eval: true` in the training configuration and pass a
+positive `--durability-timeout-seconds` when starting a new run. Pass that flag
+again on every resume; the requirement is recorded in the immutable run
+manifest. Choose enough time for download, upload and complete readback. A
+missing or invalid acknowledgement halts progress; timeout leaves the sealed
+checkpoint available for recovery. The acknowledgement is integrity evidence
+from a trusted controller, not cryptographic authentication: protect both run
+and controller directories against untrusted writers.

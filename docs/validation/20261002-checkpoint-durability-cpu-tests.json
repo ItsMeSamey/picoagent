@@ -1,0 +1,55 @@
+{
+  "schema": "picoagent.validation.checkpoint-durability.v1",
+  "date_utc": "2026-10-02",
+  "base_commit": "864340044836f0bf75c7fa09258260d4f821cb19",
+  "environment": {
+    "python": "3.12",
+    "torch": "2.14.1+cpu",
+    "transformers": "5.18.0",
+    "accelerate": "1.15.0",
+    "accelerator_used": false
+  },
+  "aggregate": {
+    "command": "PICOAGENT_RUN_ML_TESTS=1 OMP_NUM_THREADS=2 MKL_NUM_THREADS=2 USE_TORCH_XLA=0 python -m pytest -q",
+    "passed": 598,
+    "skipped": 26,
+    "subtests_passed": 44,
+    "seconds": 54.87
+  },
+  "lint": {
+    "command": "python -m ruff check src scripts tests",
+    "passed": true
+  },
+  "diff_check": true,
+  "proofs": [
+    "Fresh Python process killed during checkpoint-2 write, last complete checkpoint-1 retained, restarted final weights/Adam/scheduler bitwise equal to uninterrupted CPU reference",
+    "Missing controller acknowledgement times out; wrong run/checkpoint/hash, corrupt or partial acknowledgement rejected",
+    "Durability requirement survives process restart in immutable run manifest and cannot be omitted",
+    "Failed public upload or failed local receipt persistence never acknowledges trainer",
+    "Repeated upload reuses exact verified assets, manifest remains last, no clobber/delete",
+    "Final checkpoint timeout can use explicit finalize-only; tests forbid Trainer.train and AdamW.step and match final weights"
+  ],
+  "limits": [
+    "Public release upload/readback/restore tests use fake GitHub and HTTP; no production-size live release validation",
+    "No accelerator jobs or full model training performed",
+    "Controller gh CLI is not authenticated; no credentials configured or transferred",
+    "Prior incomplete checkpoint bytes are not present/recovered in this environment",
+    "Resume retains original source, data, configuration, hardware and package identity; fixes apply to new runs",
+    "A sudden runtime loss can still lose work since the latest fully published acknowledged checkpoint; partial transfer is never accepted as resume state"
+  ],
+  "changed_files": [
+    "docs/checkpoint_workflow.md",
+    "docs/colab.md",
+    "scripts/checkpoint_sync.py",
+    "scripts/colab_run.py",
+    "scripts/colab_sdk_watch.py",
+    "src/picoagent/training/__main__.py",
+    "src/picoagent/training/checkpointing.py",
+    "src/picoagent/training/durability.py",
+    "src/picoagent/training/provenance.py",
+    "src/picoagent/training/train.py",
+    "tests/test_checkpoint_transactions.py",
+    "tests/test_release_collector.py",
+    "tests/test_training_durability.py"
+  ]
+}

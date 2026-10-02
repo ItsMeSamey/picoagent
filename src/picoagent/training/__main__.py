@@ -28,9 +28,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     train = commands.add_parser("train", help="Run full SFT or distinctly labeled QLoRA on your already configured machine")
     train.add_argument("--config", required=True)
     train.add_argument("--resume", default=None, help="Verified checkpoint in the original run directory; immutable config must match")
+    train.add_argument("--finalize-only", action="store_true", help="With --resume at the exact final checkpoint, evaluate/export with zero optimizer updates")
     train.add_argument("--segment-steps", type=int, help="Operational maximum optimizer updates before a sealed-checkpoint pause; does not alter the configured full-run schedule")
     train.add_argument("--continue-through-checkpoints", action="store_true", help="Keep ordinary/timed checkpoints and train to the exact --segment-steps cap; default pauses at the first sealed checkpoint")
     train.add_argument("--output-budget-bytes", type=int, help="Fail-closed bound for current outputs plus one checkpoint, final model, and margin; requires --segment-steps")
+    train.add_argument("--durability-timeout-seconds", type=float, help="Wait after each sealed checkpoint for a verified off-runtime backup acknowledgement; timeout stops training; required on every resume once enabled for a new run")
     train.add_argument("--output-budget-root", help="Directory whose complete saved-output tree is included in --output-budget-bytes")
     smoke = commands.add_parser("smoke", help="Optional offline CPU random-model pipeline check; not agent evaluation")
     smoke.add_argument("--output-dir", required=True)
@@ -57,7 +59,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         result = run_training(TrainingConfig.load(args.config), resume_from_checkpoint=args.resume,
                               segment_steps=args.segment_steps, output_budget_bytes=args.output_budget_bytes,
                               output_budget_root=args.output_budget_root,
-                              continue_through_checkpoints=args.continue_through_checkpoints)
+                              continue_through_checkpoints=args.continue_through_checkpoints,
+                              durability_timeout_seconds=args.durability_timeout_seconds,
+                              finalize_only=args.finalize_only)
     else:
         from .smoke import run_smoke
         result = run_smoke(args.output_dir, device=args.device)

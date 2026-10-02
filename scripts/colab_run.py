@@ -313,8 +313,96 @@ finally:
 """)
 
 
+def validate_publication_options(publish_repository, approve_public_checkpoints):
+    if publish_repository is not None:
+        from github_checkpoint_release import REPO
+        if not approve_public_checkpoints:
+            raise ValueError("--publish-repository requires --approve-public-checkpoints")
+        if not REPO.fullmatch(publish_repository) or publish_repository.split("/")[1] in {".", ".."}:
+            raise ValueError("Expected explicit GitHub OWNER/REPO")
+
+
+def publish_collected_checkpoint(client, project, run_dir, destination, bundle, repository):
+    """Persist exact release evidence before acknowledging the trainer's barrier.
+
+    A controller-lifetime cache skips repeated public reads only after a confirmed
+    runtime acknowledgement still matches the exact locally preserved evidence.
+    Restarted controllers and uncertain acknowledgements reverify remote assets.
+    """
+    from github_checkpoint_release import digest_json, make_plan, upload_checkpoint
+    from picoagent.training.durability import acknowledgement_from_receipt
+    from picoagent.training.provenance import write_json
+    from picoagent.training.data import canonical_json
+
+    manifest = no_symlink_path(destination / ".incoming" / bundle["name"] / bundle["sha256"]
+                               / "transfer_manifest.json")
+    if sha256(manifest) != bundle["sha256"]:
+        raise ValueError("Cached transfer manifest differs from verified download")
+    plan = make_plan(destination, manifest, repository)
+    evidence = no_symlink_path(destination / "release-backups" / bundle["name"] / bundle["sha256"])
+    evidence.mkdir(parents=True, exist_ok=True)
+    # Persist newly created ancestor entries as well as the deepest evidence
+    # directory; write_json below fsyncs each plan/receipt and its own parent.
+    from checkpoint_sync import sync_directory
+    for directory in (evidence, *evidence.parents):
+        sync_directory(directory)
+        if directory == destination.resolve():
+            break
+
+    def preserve(name, payload):
+        path = no_symlink_path(evidence / name)
+        if path.exists():
+            if json.loads(path.read_text()) != payload:
+                raise ValueError("Existing release evidence disagrees with verified identity")
+        else:
+            write_json(path, payload, exclusive=True)
+
+    preserve("plan.json", plan)
+    plan_digest = digest_json(plan)
+    cache = getattr(client, "_confirmed_release_receipts", {})
+    receipt_path = no_symlink_path(evidence / "receipt.json")
+    if plan_digest in cache and receipt_path.is_file():
+        saved = json.loads(receipt_path.read_text())
+        if digest_json(saved) == cache[plan_digest]:
+            saved_ack = acknowledgement_from_receipt(saved)
+            ack_digest = hashlib.sha256((canonical_json(saved_ack) + "\n").encode()).hexdigest()
+            if bundle.get("durability_ack_sha256") == ack_digest:
+                return str(receipt_path)
+    receipt = upload_checkpoint(destination, manifest, plan,
+                                approved_plan_sha256=digest_json(plan), publish=True)
+    if receipt.get("identity") != plan["identity"] or receipt.get("plan_sha256") != digest_json(plan):
+        raise ValueError("Release receipt differs from approved checkpoint identity")
+    if (receipt.get("tag") != plan["tag"]
+            or {name: {"sha256": record.get("sha256"), "bytes": record.get("bytes")}
+                for name, record in receipt.get("assets", {}).items()} != plan["assets"]):
+        raise ValueError("Release receipt inventory differs from approved plan")
+    acknowledgement = acknowledgement_from_receipt(receipt)
+    preserve("receipt.json", receipt)
+    remote = client.execute(remote_prelude(project) + f"""
+from pathlib import Path
+from source_staging import no_symlink_path
+from picoagent.training.provenance import write_json
+acknowledgement = {repr(acknowledgement)}
+target = no_symlink_path(Path({json.dumps(run_dir)}) / 'durability' / {repr(bundle['name'] + '.json')})
+target.parent.mkdir(parents=True, exist_ok=True)
+if target.exists():
+    if json.loads(target.read_text()) != acknowledgement:
+        raise ValueError('Existing durability acknowledgement identity differs')
+else:
+    write_json(target, acknowledgement, exclusive=True)
+print({json.dumps(OUTPUT_SENTINEL)} + json.dumps({{'durability_acknowledged': {repr(bundle['name'])}}}))
+""")
+    if remote.get("durability_acknowledged") != bundle["name"]:
+        raise RuntimeError("Runtime durability acknowledgement was not confirmed")
+    cache[plan_digest] = digest_json(receipt)
+    client._confirmed_release_receipts = cache
+    return str(receipt_path)
+
+
 def collect(client: Colab, project: str, run_dir: str, export_root: str,
-            destination: Path, off_runtime: bool, prune: bool = False) -> dict:
+            destination: Path, off_runtime: bool, prune: bool = False, *,
+            publish_repository: str | None = None, approve_public_checkpoints: bool = False) -> dict:
+    validate_publication_options(publish_repository, approve_public_checkpoints)
     if not off_runtime:
         raise ValueError("--off-runtime is required: a Colab-local copy is not a backup")
     result = client.execute(remote_prelude(project) + f"""
@@ -322,6 +410,7 @@ from pathlib import Path
 from checkpoint_sync import pack_checkpoint, evaluation_record, sha256, BUNDLE_MANIFEST, CHECKPOINT, runtime_export_roots
 from checkpoint_sync import preflight_export_trees
 from picoagent.training.evaluation import checkpoint_eval_loss
+from source_staging import no_symlink_path
 run, exports = runtime_export_roots(Path({json.dumps(run_dir)}), Path({json.dumps(export_root)}))
 checkpoints = sorted((p for p in run.glob('checkpoint-*') if CHECKPOINT.fullmatch(p.name) and (p / 'checkpoint_manifest.json').is_file()), key=lambda p: int(p.name.split('-')[1]))
 preflight_export_trees(exports, [checkpoint.name for checkpoint in checkpoints])
@@ -333,6 +422,10 @@ for checkpoint in checkpoints:
     evaluation = evaluation_record(bundle)
     result['exports'].append({{'name': checkpoint.name, 'path': str(bundle), 'sha256': sha256(bundle / BUNDLE_MANIFEST),
                               'evaluation_sha256': evaluation['sha256'] if evaluation else None}})
+    if {publish_repository is not None!r}:
+        ack = no_symlink_path(run / 'durability' / (checkpoint.name + '.json'))
+        result['exports'][-1]['durability_ack_sha256'] = (sha256(ack) if ack.is_file()
+                                                        and ack.stat().st_size <= 2 * 1024**2 else None)
     if evaluation is not None:
         loss = evaluation['eval_loss']
     if loss is not None and loss < best_loss:
@@ -340,12 +433,16 @@ for checkpoint in checkpoints:
 print({json.dumps(OUTPUT_SENTINEL)} + json.dumps(result))
 """)
     acknowledged = {}
+    release_receipts = {}
     for bundle in result["exports"]:
         final = pull_checkpoint(bundle["path"].lstrip("/"), destination, client.transfer(),
                                 off_runtime=off_runtime, expected_manifest_sha256=bundle["sha256"],
                                 expected_evaluation_sha256=bundle["evaluation_sha256"])
         if final.name != bundle["name"]:
             raise ValueError("Collected checkpoint identity differs from advertised export")
+        if publish_repository is not None:
+            release_receipts[final.name] = publish_collected_checkpoint(
+                client, project, run_dir, destination, bundle, publish_repository)
         acknowledged[final.name] = {
             "checkpoint_manifest_sha256": sha256(final / "checkpoint_manifest.json"),
             "run_manifest_sha256": sha256(destination / "run_manifest.json"),
@@ -368,7 +465,8 @@ print({json.dumps(OUTPUT_SENTINEL)} + json.dumps(result))
         pending_evaluations = remote_result["pending_evaluations"]
     return {"verified_checkpoints": list(acknowledged), "destination": str(destination),
             "best_checkpoint": result["best_checkpoint"], "pruned_runtime": pruned,
-            "pending_evaluations": pending_evaluations}
+            "pending_evaluations": pending_evaluations,
+            **({"release_receipts": release_receipts} if publish_repository is not None else {})}
 
 
 
@@ -432,9 +530,14 @@ def main() -> None:
         command.add_argument("--destination", required=True, type=Path)
         command.add_argument("--off-runtime", action="store_true", required=True)
         command.add_argument("--prune", action="store_true", help="Keep latest two plus best, after host verification")
+        command.add_argument("--publish-repository", help="Publish exact verified checkpoints to public OWNER/REPO")
+        command.add_argument("--approve-public-checkpoints", action="store_true",
+                             help="Approve public disclosure of checkpoints and their pinned run/source data")
         if name == "watch":
             command.add_argument("--interval", type=int, default=60)
     args = parser.parse_args()
+    if args.action in {"collect", "watch"}:
+        validate_publication_options(args.publish_repository, args.approve_public_checkpoints)
     client = Colab(args.session, args.colab, args.timeout)
     if args.action == "stage":
         result = stage(client, args.source, args.project, args.archive,
@@ -453,7 +556,9 @@ def main() -> None:
         with _exclusive_lock(args.destination):
             while True:
                 result = collect(client, args.project, args.run_dir, args.export_root,
-                                 args.destination, args.off_runtime, args.prune)
+                                 args.destination, args.off_runtime, args.prune,
+                                 publish_repository=args.publish_repository,
+                                 approve_public_checkpoints=args.approve_public_checkpoints)
                 print(json.dumps(result), flush=True)
                 if args.action == "collect":
                     return

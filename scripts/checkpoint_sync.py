@@ -869,7 +869,10 @@ def pull_checkpoint(remote: str, destination: Path, transfer: LocalTransfer | CL
                    "destination": str(final), "off_runtime_attested": True}
         if not restore:
             write_json_atomic(destination / "receipts" / f"{name}.json", receipt)
-        shutil.rmtree(cache.parent)  # Only transient chunk cache; never training traces.
+        # Keep the exact pinned manifest for public-release publication/recovery.
+        # Only chunk payloads are transient after successful materialization.
+        shutil.rmtree(cache)
+        sync_directory(cache.parent)
         return final
     finally:
         shutil.rmtree(stage, ignore_errors=True)

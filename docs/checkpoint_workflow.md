@@ -47,10 +47,30 @@ Only then does evaluation run. Its finite metrics are published separately as
 `evaluations/checkpoint-N.json`, bound to the exact checkpoint manifest SHA256 and
 global step. A failed or interrupted evaluation leaves the sealed checkpoint
 usable for resume while its step is below the configured training target. At the
-final target, the checkpoint remains usable directly for inference, but the
-existing resume guard rejects further training; retrying final metrics/export
-needs a separate finalization workflow, which this change does not add. Every
-evaluation in this policy restores training RNG state, including eval-only steps. The sealed checkpoint is never edited to append loss.
+final target, ordinary resume rejects further training. Use `--finalize-only`
+with `--resume RUN/checkpoint-N` to load the exact final model, Trainer state and
+RNG, then evaluate and export with zero optimizer updates. This requires the
+checkpoint step to equal the saved complete schedule (and the configured
+`max_steps` when positive); the original source, config, dataset, hardware,
+precision and package-environment identity checks remain enforced.
+Durability-enabled runs still require `--durability-timeout-seconds` and the
+verified acknowledgement before finalization. Finalization reports zero new
+optimizer updates; it does not reconstruct missing training timing/loss
+aggregates. Every evaluation in this policy restores training RNG state,
+including eval-only steps. The sealed checkpoint is never edited to append loss.
+
+For example, after the final backup completes:
+
+```sh
+python -m picoagent.training train --config CONFIG.json \
+  --resume RUN/checkpoint-N --finalize-only --durability-timeout-seconds 7200
+```
+
+Omit the timeout only for runs that never required durable acknowledgements.
+Existing final artifacts are never overwritten. If export itself was interrupted
+and left a partial `final-model`/`final-adapter` directory, preserve that output
+and restore the verified final checkpoint into a fresh run tree before retrying.
+This is an explicit recovery operation, not automatic partial-export cleanup.
 An unevaluated checkpoint has no inferred loss from a different training step.
 
 `--segment-steps N` continues to pause at the first complete checkpoint by default.
@@ -74,15 +94,16 @@ nonzero dropout, not production model or benchmark results:
 
 ```sh
 PICOAGENT_RUN_ML_TESTS=1 OMP_NUM_THREADS=2 MKL_NUM_THREADS=2 \
-  python -m pytest tests/test_training_efficiency.py tests/test_training_smoke.py -q
+  python -m pytest tests/test_training_efficiency.py tests/test_training_smoke.py tests/test_checkpoint_transactions.py -q
 ```
 
-The eight tests cover bitwise final-weight, optimizer, RNG and scheduler equality
+The tests cover bitwise final-weight, optimizer, RNG and scheduler equality
 after a capped multi-checkpoint resume and after interruption between sealing
 and evaluation; an odd-sized, accumulated cross-epoch dropout resume;
 independent eval-only steps; checkpoint immutability; real bounded-output failure
-caused by export files; legacy pause/cadence behavior; and the final-step recovery
-limit. The opt-in policy also reuses final-step metrics instead of repeating the same development evaluation.
+caused by export files; legacy pause/cadence behavior; fresh-process recovery
+after a killed partial save; and zero-update finalization after a final backup
+timeout. The opt-in policy also reuses final-step metrics instead of repeating the same development evaluation.
 These CPU proofs do not establish accelerator speed, cross-device determinism,
 or agent task quality.
 

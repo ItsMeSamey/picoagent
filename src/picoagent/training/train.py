@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .config import TrainingConfig, select_precision
-from .checkpointing import CheckpointTimer
+from .checkpointing import CheckpointTimer, save_checkpoint_transaction
 from .data import sha256_file, verify_dataset
 from .encoding import AssistantOnlyCollator, encode_records
 from .device import resolve_device
@@ -92,7 +92,9 @@ def _evaluate_preserving_rng(trainer: Any, evaluate: Callable[[], dict[str, Any]
 def run_training(config: TrainingConfig, *, resume_from_checkpoint: str | None = None,
                  segment_steps: int | None = None, output_budget_bytes: int | None = None,
                  output_budget_root: str | None = None,
-                 continue_through_checkpoints: bool = False) -> dict[str, Any]:
+                 continue_through_checkpoints: bool = False,
+                 durability_timeout_seconds: float | None = None,
+                 finalize_only: bool = False) -> dict[str, Any]:
     """Train locally. Never launch/lease a GPU, push a model, or evaluate a benchmark.
 
     Full mode updates every parameter using FP32 master weights plus CUDA BF16/
@@ -104,13 +106,25 @@ def run_training(config: TrainingConfig, *, resume_from_checkpoint: str | None =
     after a full checkpoint has been sealed. The same config and runtime
     identity are required to resume the next segment.
     """
+    if type(finalize_only) is not bool:
+        raise ValueError("finalize_only must be a boolean")
+    if finalize_only and (resume_from_checkpoint is None or segment_steps is not None):
+        raise ValueError("finalize_only requires --resume and cannot use segment_steps")
+    if durability_timeout_seconds is not None and (
+        isinstance(durability_timeout_seconds, bool)
+        or not isinstance(durability_timeout_seconds, (int, float))
+        or not math.isfinite(durability_timeout_seconds) or durability_timeout_seconds <= 0
+    ):
+        raise ValueError("durability_timeout_seconds must be positive finite seconds")
+    if durability_timeout_seconds is not None and not config.checkpoint_before_eval:
+        raise ValueError("durability_timeout_seconds requires checkpoint_before_eval")
     if segment_steps is not None and (type(segment_steps) is not int or segment_steps <= 0):
         raise ValueError("segment_steps must be a positive integer when supplied")
     if type(continue_through_checkpoints) is not bool:
         raise ValueError("continue_through_checkpoints must be a boolean")
     if continue_through_checkpoints and segment_steps is None:
         raise ValueError("continue_through_checkpoints requires an explicit segmented run")
-    if output_budget_bytes is not None and segment_steps is None:
+    if output_budget_bytes is not None and segment_steps is None and not finalize_only:
         raise ValueError("output_budget_bytes requires an explicit segmented run")
     if output_budget_bytes is not None and (type(output_budget_bytes) is not int or output_budget_bytes <= 0):
         raise ValueError("output_budget_bytes must be a positive integer")
@@ -137,7 +151,7 @@ def run_training(config: TrainingConfig, *, resume_from_checkpoint: str | None =
         raise ValueError("output_dir must be new or empty; use --resume for an existing audited run")
     if resume_from_checkpoint is not None:
         checkpoint = Path(resume_from_checkpoint).resolve()
-        preflight_resume(output, checkpoint, max_steps=config.max_steps)
+        preflight_resume(output, checkpoint, max_steps=config.max_steps, finalize_only=finalize_only)
         if not (output / "run_manifest.json").is_file():
             raise ValueError("Resume requires the original run_manifest.json")
     try:
@@ -176,9 +190,19 @@ def run_training(config: TrainingConfig, *, resume_from_checkpoint: str | None =
         identity["prepared_tokens"] = prepared.identity
     if resume_from_checkpoint:
         original = json.loads((output / "run_manifest.json").read_text())
+        durability_required = original.get("durability_required", False)
+        if type(durability_required) is not bool:
+            raise ValueError("Invalid run manifest durability requirement")
+        if durability_required and durability_timeout_seconds is None:
+            raise ValueError("This run requires --durability-timeout-seconds on every resume")
+        if not durability_required and durability_timeout_seconds is not None:
+            raise ValueError("Cannot add a durability requirement to an immutable legacy run; create a new run")
         if original.get("identity") != identity:
             raise ValueError("Resume identity mismatch: config, source, dataset, hardware, precision and package versions must match the original run")
         verify_checkpoint(checkpoint, sha256_file(output / "run_manifest.json"))
+        if durability_timeout_seconds is not None:
+            from .durability import wait_for_durable_ack
+            wait_for_durable_ack(output, checkpoint, durability_timeout_seconds)
 
 
     common = {"revision": config.model_revision, "trust_remote_code": False, "local_files_only": config.smoke_test}
@@ -278,6 +302,7 @@ def run_training(config: TrainingConfig, *, resume_from_checkpoint: str | None =
             "model": {"id": config.model_id, "requested_revision": config.model_revision,
                 "resolved_revision": resolved_revision, "cached_assets": model_cache, "local_files": tree_hashes(Path(config.model_id)) if config.smoke_test else None},
             "mode": config.training_mode,
+            "durability_required": durability_timeout_seconds is not None,
             "parameter_policy": "all_parameters_fp32_master_with_autocast" if config.training_mode == "full" else "frozen_nf4_base_trainable_lora_adapters",
             "parameter_counts": {"total": total_parameters, "trainable": trainable_parameters},
             "effective_batch_size": config.per_device_batch_size * config.gradient_accumulation_steps,
@@ -333,6 +358,9 @@ def run_training(config: TrainingConfig, *, resume_from_checkpoint: str | None =
             if state.is_world_process_zero:
                 checkpoint = output / f"checkpoint-{state.global_step}"
                 checkpoint_evidence(checkpoint, run_manifest_hash)
+                if durability_timeout_seconds is not None:
+                    from .durability import wait_for_durable_ack
+                    wait_for_durable_ack(output, checkpoint, durability_timeout_seconds)
                 self.last_checkpoint = checkpoint.name
                 self.new_checkpoints.append(checkpoint.name)
                 at_boundary = self.boundary_step is not None and state.global_step >= self.boundary_step
@@ -392,7 +420,17 @@ def run_training(config: TrainingConfig, *, resume_from_checkpoint: str | None =
                 space = _output_budget_reservation(
                     output, parameters=total_parameters, budget_bytes=output_budget_bytes,
                     budget_root=Path(output_budget_root) if output_budget_root else None)
-            return super()._save_checkpoint(*args, **kwargs)
+            save = super()._save_checkpoint
+            original_output = self.args.output_dir
+
+            def save_staged(staging_root: Path) -> None:
+                self.args.output_dir = str(staging_root)
+                try:
+                    save(*args, **kwargs)
+                finally:
+                    self.args.output_dir = original_output
+
+            save_checkpoint_transaction(output, self.state.global_step, save_staged, run_manifest_hash)
 
         def evaluate(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
             # In the opt-in policy, *every* evaluation is isolated, including
@@ -427,10 +465,22 @@ def run_training(config: TrainingConfig, *, resume_from_checkpoint: str | None =
     write_json(output / "run_status.json", {
         "status": "running", "started_at": now_utc(), "resume_from": resume_from_checkpoint,
         "segment_limit_optimizer_steps": segment_steps, "continue_through_checkpoints": continue_through_checkpoints,
-        "output_space_preflight": space,
+        "output_space_preflight": space, "finalize_only": finalize_only,
     })
     try:
-        result = trainer.train(resume_from_checkpoint=resume_from_checkpoint)
+        if finalize_only:
+            # Never call Trainer.train here: some versions perform an extra
+            # optimizer step when resumed at the nominal end of the schedule.
+            from transformers.trainer_callback import TrainerState
+            trainer._load_from_checkpoint(str(checkpoint))
+            trainer.state = TrainerState.load_from_json(str(checkpoint / "trainer_state.json"))
+            trainer._load_rng_state(str(checkpoint))
+            training_metrics = {"finalize_only": True, "optimizer_updates_this_invocation": 0,
+                                "global_step": trainer.state.global_step,
+                                "note": "Training timing/loss aggregates are not reconstructed; original step logs remain in trainer state."}
+        else:
+            result = trainer.train(resume_from_checkpoint=resume_from_checkpoint)
+            training_metrics = result.metrics
         if segment_steps is not None:
             global_step = trainer.state.global_step
             planned_steps = trainer.state.max_steps
@@ -485,7 +535,7 @@ def run_training(config: TrainingConfig, *, resume_from_checkpoint: str | None =
         last_evaluation = trainer_holder.get("last_evaluation")
         development = (last_evaluation[1] if config.checkpoint_before_eval and last_evaluation is not None
                        and last_evaluation[0] == trainer.state.global_step else trainer.evaluate())
-        metrics = {"training": result.metrics, "development": development, "benchmark": None}
+        metrics = {"training": training_metrics, "development": development, "benchmark": None}
         final_dir = output / ("final-model" if config.training_mode == "full" else "final-adapter")
         model.config.use_cache = True
         trainer.save_model(str(final_dir))

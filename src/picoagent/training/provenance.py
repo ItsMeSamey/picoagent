@@ -74,9 +74,12 @@ def environment_evidence() -> dict[str, Any]:
 
 
 def checkpoint_evidence(checkpoint: Path, run_manifest_sha256: str) -> Path:
+    path = checkpoint / "checkpoint_manifest.json"
+    if path.exists():
+        verify_checkpoint(checkpoint, run_manifest_sha256)
+        return path
     payload = {"schema": "picoagent.checkpoint.v1", "run_manifest_sha256": run_manifest_sha256,
                "files": tree_hashes(checkpoint, exclude={"checkpoint_manifest.json"})}
-    path = checkpoint / "checkpoint_manifest.json"
     write_json(path, payload, exclusive=True)
     return path
 
@@ -87,6 +90,11 @@ def verify_checkpoint(checkpoint: Path, run_manifest_sha256: str) -> None:
         raise ValueError("Checkpoint belongs to another or unknown run")
     if tree_hashes(checkpoint, exclude={"checkpoint_manifest.json"}) != manifest.get("files"):
         raise ValueError("Checkpoint integrity verification failed")
+    validate_resume_files(checkpoint)
+
+
+def validate_resume_files(checkpoint: Path) -> None:
+    """Require the complete local Trainer state before checkpoint publication."""
     weight_files = {"model.safetensors", "pytorch_model.bin", "model.safetensors.index.json", "pytorch_model.bin.index.json",
                     "adapter_model.safetensors", "adapter_model.bin"}
     if not any((checkpoint / filename).is_file() for filename in weight_files):
@@ -98,7 +106,7 @@ def verify_checkpoint(checkpoint: Path, run_manifest_sha256: str) -> None:
         raise ValueError("Checkpoint missing RNG state; exact resume is unavailable")
 
 
-def preflight_resume(output: Path, checkpoint: Path, *, max_steps: int) -> None:
+def preflight_resume(output: Path, checkpoint: Path, *, max_steps: int, finalize_only: bool = False) -> None:
     """Reject old/colliding checkpoints before Trainer can overwrite future state."""
     import re
 
@@ -119,8 +127,16 @@ def preflight_resume(output: Path, checkpoint: Path, *, max_steps: int) -> None:
         state = json.loads(state_path.read_text())
         if state.get("global_step") != selected:
             raise ValueError("Checkpoint step does not agree with trainer_state.json")
-        if max_steps > 0 and selected >= max_steps:
-            raise ValueError("Checkpoint already reaches the configured training budget; it can be used directly for inference without retraining")
+        if finalize_only:
+            planned = state.get("max_steps")
+            if type(planned) is not int or planned <= 0 or selected != planned:
+                raise ValueError("Finalize-only requires the exact final scheduled checkpoint")
+            if max_steps > 0 and selected != max_steps:
+                raise ValueError("Finalize-only checkpoint differs from the configured training budget")
+        elif max_steps > 0 and selected >= max_steps:
+            raise ValueError("Checkpoint already reaches the configured training budget; use --finalize-only to evaluate/export without retraining")
+    elif finalize_only:
+        raise ValueError("Finalize-only requires saved trainer state")
 
 
 def snapshot_revision(path: str | Path) -> str:
