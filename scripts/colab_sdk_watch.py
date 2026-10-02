@@ -14,7 +14,8 @@ import time
 from checkpoint_sync import MAX_DOWNLOAD_WORKERS, validate_download_workers
 from colab_persistent_stage import PersistentSession, parse_result
 from colab_run import collect, status, validate_publication_options
-from colab_safe_cli import invoke, report_error
+from colab_safe_cli import (invoke, report_error, safe_http_status,
+                            retryable_transport_error as _retryable_transport_error)
 
 
 class SDKTransfer:
@@ -75,28 +76,6 @@ def _training_exit_code(snapshot):
     return min(255, returncode)
 
 
-def _retryable_transport_error(error):
-    """Retry transport outages only, never permission/quota/integrity failures."""
-    from urllib.error import HTTPError, URLError
-    status = (error.code if isinstance(error, HTTPError) else
-              getattr(getattr(error, 'response', None), 'status_code', None))
-    if status is not None:
-        return type(status) is int and status in {408, 500, 502, 503, 504}
-    if isinstance(error, URLError):
-        return isinstance(error.reason, (ConnectionError, TimeoutError))
-    if isinstance(error, (ConnectionError, TimeoutError)):
-        return True
-    # Optional vendor dependencies remain unnecessary for local CPU tests.
-    classes = {(base.__module__.split('.')[0], base.__name__)
-               for base in type(error).__mro__}
-    if any(name in {'SSLError', 'SSLCertVerificationError'} for _, name in classes):
-        return False
-    return bool(classes & {('requests', 'ConnectionError'), ('requests', 'Timeout'),
-                           ('httpx', 'TransportError'),
-                           ('websocket', 'WebSocketConnectionClosedException'),
-                           ('websocket', 'WebSocketTimeoutException')})
-
-
 def watch(client, *, project, run_dir, export_root, destination, prune=False,
           interval=120, collect_fn=None, status_fn=None, sleep_fn=None, emit=None,
           publish_repository=None, approve_public_checkpoints=False, prune_local_published_cache=False,
@@ -147,7 +126,11 @@ def watch(client, *, project, run_dir, export_root, destination, prune=False,
                 if stop_file is not None and Path(stop_file).exists():
                     raise
                 emit(json.dumps({'controller_retry': True, 'phase': phase,
-                                 'error_type': type(error).__name__, 'retry_seconds': delay}))
+                                 'error_type': type(error).__name__, 'retry_seconds': delay,
+                                 'http_status': safe_http_status(error),
+                                 'adapter_phase': (getattr(error, 'phase', None) if
+                                     getattr(error, 'phase', None) in
+                                     {'reconnect', 'refresh', 'execute', 'download'} else None)}))
                 sleep_fn(delay)
                 delay = min(retry_max_seconds, delay * 2)
 

@@ -20,10 +20,11 @@
     "status_exposure_tests": 16,
     "ruff": "passed",
     "whitespace": "passed",
-    "full_suite_passed": 723,
+    "full_suite_passed": 766,
     "full_suite_skipped": 41,
     "full_suite_subtests": 44,
-    "production_prepared_admission": "passed_cpu_only"
+    "production_prepared_admission": "passed_cpu_only",
+    "final_memory_adapter_and_security_tests": 92
   },
   "limitations": [
     "No live runtime allocated or trained for this policy",

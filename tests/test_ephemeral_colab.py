@@ -390,3 +390,85 @@ def test_directory_listing_requires_unique_exact_child(setup, entries):
         with pytest.raises(RuntimeError):
             controller.download('/content/file', path.parent / 'download')
     assert not (path.parent / 'download').exists()
+
+
+@pytest.mark.parametrize('phase', ['reconnect', 'refresh', 'execute', 'download'])
+@pytest.mark.parametrize('kind,retry,status', [
+    ('timeout', True, None), ('connection', True, None), ('503', True, 503),
+    ('403', False, 403), ('429', False, 429), ('integrity', False, None),
+    ('certificate', False, None),
+])
+def test_safe_typed_errors_preserve_transience_and_numeric_diagnostics(setup, capsys, phase, kind, retry, status):
+    import requests
+    from colab_safe_cli import report_error, retryable_transport_error
+    path, client = setup
+    if kind.isdecimal():
+        error = requests.HTTPError(SECRET)
+        error.response = SimpleNamespace(status_code=int(kind), url=SECRET)
+    else:
+        error = {'timeout': requests.Timeout, 'connection': requests.ConnectionError,
+                 'integrity': ValueError, 'certificate': requests.exceptions.SSLError}[kind](SECRET)
+
+    def fail(*args, **kwargs):
+        raise error
+
+    class BrokenRuntime(Runtime):
+        execute_code = fail
+
+    class BrokenContents(Contents):
+        download = fail
+
+    expected = ConnectionError if retry else RuntimeError
+    if phase == 'reconnect':
+        client.list_assignments = fail
+        with pytest.raises(expected) as result:
+            EphemeralController(path, client=client)
+    else:
+        with EphemeralController(path, client=client, runtime_factory=BrokenRuntime,
+                                 contents_factory=BrokenContents) as controller:
+            with pytest.raises(expected) as result:
+                if phase == 'execute':
+                    controller.execute('fixture')
+                elif phase == 'download':
+                    controller.download('content/file', path.parent / 'download')
+                else:
+                    client.list_assignments = fail
+                    controller.refresh()
+            assert controller.runtime is None
+    safe = result.value
+    assert retryable_transport_error(safe) is retry
+    assert safe.phase == phase and safe.http_status == status
+    assert not hasattr(safe, 'response')
+    assert SECRET not in str(safe)
+    assert safe.__suppress_context__
+    report_error('fixture', safe)
+    diagnostic = capsys.readouterr().err
+    assert SECRET not in diagnostic and f'phase={phase}' in diagnostic
+    if status:
+        assert f'HTTP {status}' in diagnostic
+    assert SECRET not in path.read_text()
+    assert client.allocations == 0
+    assert not list(path.parent.glob('.colab-download-*'))
+
+
+def test_real_ephemeral_adapter_retries_execute_through_watcher(setup):
+    import requests
+    from colab_sdk_watch import watch
+    path, client = setup
+    attempts, sleeps = [], []
+
+    class FlakyRuntime(Runtime):
+        def execute_code(self, code, timeout):
+            attempts.append(code)
+            if len(attempts) == 1:
+                raise requests.ConnectionError(SECRET)
+            return super().execute_code(code, timeout)
+
+    with EphemeralController(path, client=client, runtime_factory=FlakyRuntime) as controller:
+        assert watch(controller, project='/p', run_dir='/r', export_root='/e',
+                     destination=path.parent / 'archive',
+                     collect_fn=lambda adapter, *args: adapter.execute('fixture'),
+                     status_fn=lambda *args: {'run_status': {'status': 'completed'}},
+                     sleep_fn=sleeps.append, emit=lambda _: None) == 0
+    assert sleeps == [10] and len(attempts) == 3
+    assert client.allocations == 0

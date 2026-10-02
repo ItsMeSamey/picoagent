@@ -95,3 +95,68 @@ def test_one_cleanup_failure_does_not_skip_other_clients(capsys):
     invoke(lambda: (UnreliableRuntime(), UnreliableRuntime()), UnreliableRuntime, FakeSocket)
     assert UnreliableRuntime.instances[-1].closed
     assert "DUMMY_PRIVATE_CLEANUP_ERROR" not in capsys.readouterr().err
+
+
+@pytest.mark.parametrize('wrapper', ['builtin', 'httpx', 'requests', 'urllib'])
+@pytest.mark.parametrize('link', ['cause', 'context'])
+def test_wrapped_certificate_failures_never_become_retryable(wrapper, link):
+    import ssl
+    from urllib.error import URLError
+    from colab_safe_cli import retryable_transport_error, sanitized_controller_error
+    certificate = ssl.SSLCertVerificationError('PRIVATE_CERT_URL')
+    if wrapper == 'builtin':
+        error = ConnectionError('PRIVATE_URL')
+    elif wrapper == 'httpx':
+        httpx = pytest.importorskip('httpx')
+        error = httpx.ConnectError('PRIVATE_URL')
+    elif wrapper == 'requests':
+        requests = pytest.importorskip('requests')
+        error = requests.ConnectionError('PRIVATE_URL')
+    else:
+        error = URLError(certificate)
+    setattr(error, '__' + link + '__', certificate)
+    assert not retryable_transport_error(error)
+    safe = sanitized_controller_error(error, 'download', 'Download failed')
+    assert isinstance(safe, RuntimeError)
+    assert not retryable_transport_error(safe)
+    assert 'PRIVATE' not in str(safe)
+
+
+def test_transport_chain_is_cycle_safe_and_budget_fails_closed():
+    from colab_safe_cli import retryable_transport_error
+    first, second = ConnectionError('first'), ConnectionError('second')
+    first.__cause__, second.__context__ = second, first
+    assert retryable_transport_error(first)
+    root = current = ConnectionError('root')
+    for _ in range(17):
+        current.__cause__ = ConnectionError('nested')
+        current = current.__cause__
+    assert not retryable_transport_error(root)
+
+
+def test_wrapped_permission_beats_outer_transient_http_status():
+    from types import SimpleNamespace
+    from colab_safe_cli import retryable_transport_error
+    error = ConnectionError('PRIVATE_URL')
+    error.response = SimpleNamespace(status_code=503)
+    error.__cause__ = PermissionError('PRIVATE_DENIAL')
+    assert not retryable_transport_error(error)
+    from colab_safe_cli import sanitized_controller_error
+    safe = sanitized_controller_error(error, 'download', 'Download failed')
+    assert safe.http_status == 503
+    assert not retryable_transport_error(safe)
+
+
+@pytest.mark.parametrize('status', [401, 403, 407, 429])
+def test_nested_http_denials_never_retry(status):
+    from types import SimpleNamespace
+    from colab_safe_cli import retryable_transport_error, sanitized_controller_error
+    inner = RuntimeError('PRIVATE_RESPONSE')
+    inner.response = SimpleNamespace(status_code=status)
+    outer = ConnectionError('PRIVATE_URL')
+    outer.__cause__ = inner
+    assert not retryable_transport_error(outer)
+    safe = sanitized_controller_error(outer, 'refresh', 'Refresh failed')
+    assert safe.http_status == status
+    assert not retryable_transport_error(safe)
+    assert 'PRIVATE' not in str(safe)

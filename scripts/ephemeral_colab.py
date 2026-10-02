@@ -19,6 +19,8 @@ import tempfile
 import threading
 import uuid
 
+from colab_safe_cli import sanitized_controller_error
+
 FIELDS = {'schema', 'name', 'endpoint', 'kernel_id', 'session_id', 'notebook_hash', 'phase'}
 IDENTIFIER = re.compile(r'[A-Za-z0-9_.:-]{1,256}\Z')
 SCHEMA = 'picoagent.ephemeral-colab.v1'
@@ -189,10 +191,11 @@ class EphemeralController:
         self._closed = False
         try:
             self._refresh(force=True)
-        except BaseException:
+        except BaseException as error:
             self._disconnect()
             self.session = None
-            raise RuntimeError('Exact endpoint reconnect failed; no runtime was allocated') from None
+            raise sanitized_controller_error(error, 'reconnect',
+                'Exact endpoint reconnect failed; no runtime was allocated') from None
 
     def _save_id(self, field, value):
         with self._lock:
@@ -240,9 +243,9 @@ class EphemeralController:
         with self._lock:
             try:
                 self._refresh(force=True)
-            except BaseException:
+            except BaseException as error:
                 self._disconnect()
-                raise RuntimeError('Session refresh failed; private error details suppressed') from None
+                raise sanitized_controller_error(error, 'refresh', 'Session refresh failed') from None
         return dict(self.record)
 
     @private_call
@@ -262,9 +265,9 @@ class EphemeralController:
                         on_kernel_started=lambda value: self._save_id('kernel_id', value),
                         on_session_started=lambda value: self._save_id('session_id', value))
                 return parse_result(self.runtime.execute_code(code, timeout=self.timeout))
-            except BaseException:
+            except BaseException as error:
                 self._disconnect()
-                raise RuntimeError('Remote execution failed; private error details suppressed') from None
+                raise sanitized_controller_error(error, 'execute', 'Remote execution failed') from None
 
     def transfer(self):
         return self
@@ -308,10 +311,10 @@ class EphemeralController:
                 os.fsync(handle.fileno())
             local_transfer_path(local)
             os.replace(temporary, local)
-        except BaseException:
+        except BaseException as error:
             with self._lock:
                 self._disconnect()
-            raise RuntimeError('Download failed; private error details suppressed') from None
+            raise sanitized_controller_error(error, 'download', 'Download failed') from None
         finally:
             if temporary is not None:
                 temporary.unlink(missing_ok=True)
