@@ -266,7 +266,14 @@ def stage(client: Colab, root: Path, project: str, archive_path: Path, *,
             "selected_dataset": result["manifest"].get("selected_dataset")}
 
 
-def start(client: Colab, project: str, command: list[str]) -> dict:
+def start(client: Colab, project: str, command: list[str], *, wait_for_completion: bool = False) -> dict:
+    """Launch once; optionally keep this execution awaiting the actual workload.
+
+    An ambiguous execute timeout must be inspected, never automatically retried.
+    The supervisor owns job status even if this foreground execution disconnects.
+    """
+    if type(wait_for_completion) is not bool:
+        raise ValueError("wait_for_completion must be a boolean")
     if not command or not all(isinstance(arg, str) for arg in command):
         raise ValueError("--command-json must be a nonempty JSON argv array")
     # The child supervisor records terminal status even if the controller disconnects.
@@ -284,6 +291,8 @@ try:
 except BaseException as exc:
     save({'status': 'failed', 'error': str(exc), 'finished_at': time.time()})
     raise
+# Exit outside the exception handler so SystemExit does not overwrite job state.
+sys.exit(result.returncode)
 """
     return client.execute(f"""
 import json, os, pathlib, subprocess, sys
@@ -297,6 +306,12 @@ lock = project / '.picoagent-launch.lock'
 with lock.open('x') as guard:
     guard.write('launch in progress')
 try:
+    # Another launcher may have reserved/spawned between our initial status read
+    # and acquisition. Recheck while holding the exclusive launch lock.
+    if state.exists():
+        old = json.loads(state.read_text())
+        if old.get('status') in {{'running', 'starting'}}:
+            raise RuntimeError('A recorded job is already running. Inspect it before restarting; no automatic duplicate launch.')
     # Reserve before spawn so an uncertain/repeated request cannot race the child.
     state.write_text(json.dumps({{'status': 'starting', 'command': {repr(command)}}}))
     log = (project / 'controller-job.log').open('ab', buffering=0)
@@ -306,10 +321,15 @@ try:
     except BaseException:
         state.write_text(json.dumps({{'status': 'failed', 'error': 'Supervisor launch failed'}}))
         raise
-    print({json.dumps(OUTPUT_SENTINEL)} + json.dumps({{'supervisor_pid': child.pid, 'log': str(project / 'controller-job.log')}}))
+    result = {{'supervisor_pid': child.pid, 'log': str(project / 'controller-job.log')}}
 finally:
     lock.unlink()
-
+# Release the launch reservation before waiting on the real supervised workload.
+# This does not poll, reconnect, retry, or perform unrelated keepalive activity.
+if {wait_for_completion!r}:
+    result['returncode'] = child.wait()
+    result['waited_for_completion'] = True
+print({json.dumps(OUTPUT_SENTINEL)} + json.dumps(result))
 """)
 
 
@@ -543,6 +563,8 @@ def main() -> None:
     staging.add_argument("--transfer-root", default="/content/picoagent-source-uploads")
     launch = sub.add_parser("start")
     launch.add_argument("--command-json", required=True)
+    launch.add_argument("--wait-for-completion", action="store_true",
+                        help="Keep this execution waiting on the actual training supervisor; never retry an ambiguous timeout")
     recovery = sub.add_parser("restore")
     recovery.add_argument("--source", type=Path, required=True)
     recovery.add_argument("--checkpoint", required=True)
@@ -578,7 +600,8 @@ def main() -> None:
                        dataset_manifest=args.dataset_manifest, chunk_bytes=args.chunk_bytes,
                        transfer_root=args.transfer_root)
     elif args.action == "start":
-        result = start(client, args.project, json.loads(args.command_json))
+        result = start(client, args.project, json.loads(args.command_json),
+                       **({"wait_for_completion": True} if args.wait_for_completion else {}))
     elif args.action == "status":
         result = status(client, args.project, args.run_dir)
     elif args.action == "restore":

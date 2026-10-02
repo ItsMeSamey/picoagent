@@ -228,3 +228,22 @@ incomplete partials to force a download to fit; insufficient space stops safely.
 If eviction is interrupted after its durable intent is saved, a later collection
 reports the incomplete eviction and retains remaining bytes for recovery rather
 than silently declaring cleanup successful or deleting unverified leftovers.
+
+### Optional foreground launch wait
+
+`colab_run.py start --wait-for-completion --command-json '[...]'` keeps the
+remote execution waiting on the actual training supervisor with `child.wait()`.
+The default still returns after launch. Foreground mode releases the exclusive
+launch lock before waiting and returns the supervisor's `returncode` once it
+finishes; the supervisor remains responsible for `.picoagent-job.json`, including
+failed training outcomes. Both modes recheck the duplicate-launch reservation
+while holding the lock. This is an actual workload wait, without polling or
+artificial keepalive activity. Use a separately verified control kernel for
+checkpoint collection when the training kernel is occupied.
+
+A foreground request may outlast a controller or transport timeout. An ambiguous
+timeout is not permission to launch again: inspect the existing supervisor, job
+status, and runtime first. This option neither retries execution nor cancels the
+training child when the foreground request disconnects. Hard session/tool
+termination can bypass Python cleanup; verify the process subtree and lock state
+before a coordinated restart rather than assuming cleanup ran.
