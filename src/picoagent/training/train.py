@@ -340,6 +340,10 @@ def run_training(config: TrainingConfig, *, resume_from_checkpoint: str | None =
         def on_step_end(self, args: Any, state: Any, control: Any, **kwargs: Any) -> Any:
             at_boundary = self.boundary_step is not None and state.global_step >= self.boundary_step
             timer_due = self.timer.due()
+            # Prove the full-size off-runtime backup before substantial training.
+            # Subsequent saves keep the configured step/timer cadence unchanged.
+            if durability_timeout_seconds is not None and state.global_step == 1:
+                control.should_save = True
             if timer_due and not at_boundary:
                 control.should_save = True
                 if not config.checkpoint_before_eval:

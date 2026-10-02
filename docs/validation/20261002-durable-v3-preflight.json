@@ -1,0 +1,35 @@
+{
+  "schema": "picoagent.validation.durable-v3-preflight.v1",
+  "date_utc": "2026-10-02",
+  "training_config": "configs/smol360m_native_t4_prepared_v3_durable.json",
+  "training_mode": "full",
+  "precision": "fp16",
+  "preferred_hardware": "free Tesla T4",
+  "full_schedule_optimizer_updates": 3044,
+  "epochs": 1,
+  "training_examples": 48702,
+  "development_examples": 1203,
+  "prepared_manifest_sha256": "6dcd339eb9b25ea8edb2ad625b8988cf67baa814614407d983a8c5b0734945a6",
+  "prepared_inventory_files_verified": 83,
+  "first_optimizer_step_requires_full_public_backup": true,
+  "checkpoint_steps_after_initial_proof": 100,
+  "checkpoint_timer_seconds": 600,
+  "controller_cleanup": "Explicit opt-in only; remove older verified recoverable local payloads after new public backup; retain all releases, latest full local checkpoint and all metadata/source/data/partials",
+  "tests": {
+    "passed": 614,
+    "skipped": 26,
+    "subtests_passed": 44,
+    "seconds": 61.39,
+    "command": "PICOAGENT_RUN_ML_TESTS=1 OMP_NUM_THREADS=2 MKL_NUM_THREADS=2 USE_TORCH_XLA=0 python -m pytest -q",
+    "focused_cache_collector_tests_passed": 30
+  },
+  "ruff_passed": true,
+  "diff_check_passed": true,
+  "training_started_during_this_preflight": false,
+  "accelerator_allocated_during_this_preflight": false,
+  "limits": [
+    "CPU verification and previous tiny live release proof do not prove 4.3GB transfer throughput or accelerator model quality",
+    "Production must stop at first full checkpoint until complete durable public-release acknowledgement",
+    "Controller and runtime free-space preflight remain required"
+  ]
+}

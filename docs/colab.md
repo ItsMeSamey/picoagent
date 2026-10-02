@@ -4,7 +4,7 @@ This controller uses Google's [official Colab CLI](https://github.com/googlecola
 
 ## Boundaries and current evidence
 
-- Prefer a **free TPU v5e1**. Run the XLA plumbing smoke before any production training. Use a **free T4** only if TPU availability or a recorded compatibility test blocks progress. A fallback is an explicit operator action, not an automatic allocation loop
+- Current approved fresh run prefers a **free T4** with the pinned prepared-data full-finetune config. Private free Kaggle is the approved fallback if Colab is unavailable. Do not allocate paid accelerators or touch another task’s existing session. Earlier TPU-first notes describe prior attempts, not this run’s preference.
 - No purchase, subscription, compute-unit consumption that would charge the user, or paid upgrade is authorized by these scripts. A hardware request alone does not prove an account allocation is free; check its billing/usage information before allocation
 - `configs/smol360m_tpu.json` requires XLA and refuses silent CPU fallback. `configs/smol360m_full.json` supports auto backend selection; confirm CUDA/T4 when using it as the fallback
 - CPU smoke and fake-transport tests demonstrate plumbing. They do not demonstrate TPU/GPU success, model quality, or benchmark results. See the run's actual manifests/status for hardware validation
@@ -181,3 +181,50 @@ missing or invalid acknowledgement halts progress; timeout leaves the sealed
 checkpoint available for recovery. The acknowledgement is integrity evidence
 from a trusted controller, not cryptographic authentication: protect both run
 and controller directories against untrusted writers.
+
+## Fresh full durable v3 run
+
+`configs/smol360m_native_t4_prepared_v3_durable.json` preserves the v2 model,
+admitted data, optimizer settings and full one-epoch schedule (3,044 optimizer
+updates for 48,702 examples at accumulation 16), with a fresh output directory.
+Use `--durability-timeout-seconds` and the approved public-release watcher. A
+durability-enabled new run saves at optimizer step 1 to prove its real full-size
+backup before continuing; later saves retain the 100-step/600-second cadence.
+The GPU smoke-only limit remains 60 seconds; setup, full training, checkpoint
+transfer and evaluation may take longer. The first-step pause does not shorten
+the training schedule. Loss is a diagnostic; agent capability requires the
+separate full/half/manual tool evaluation.
+
+### Bounded controller checkpoint cache (explicit opt-in)
+
+For the full-run watcher, add `--prune-local-published-cache` alongside
+`--publish-repository OWNER/REPO --approve-public-checkpoints`. This separately
+approves removal of older local, fully verified public-release checkpoint
+payloads. It does not delete or change any GitHub release. Keep the collector's
+exclusive destination lock; do not run simultaneous collectors against it.
+
+Each newer checkpoint must finish local integrity verification, public release
+publication/readback, saved plan/receipt persistence, and runtime acknowledgement
+before older payloads can be evicted. The latest local checkpoint is retained.
+Only conventional model/optimizer/scheduler/RNG/scaler payload filenames are
+eligible. JSON metadata, all manifests, source/data snapshots, release plans and
+receipts, evaluations, and incoming partial transfers are preserved. Unexpected
+entries, traces, symlinks or integrity mismatches fail closed before eviction.
+A small per-release eviction record preserves the exact plan/receipt hashes and
+payload list, including if local unlink is interrupted.
+
+Previously published older exports are not downloaded again when their exact
+runtime acknowledgement digest matches the saved release evidence. Within one
+controller process, only already verified receipt hashes are reused. After a
+restart, every release asset is read back and hashed, its public identity and
+asset IDs are rechecked, and the manifest is fetched anonymously before skipping
+an evicted export. Evaluation sidecars are still collected on subsequent polls.
+Do not remove the saved evidence: it is required for safe deduplication/recovery.
+
+Peak disk usage still includes the previous full checkpoint plus the new
+checkpoint's download chunks and atomic reconstruction (roughly three checkpoint
+sizes plus source/metadata and headroom). This flag does not remove unique or
+incomplete partials to force a download to fit; insufficient space stops safely.
+If eviction is interrupted after its durable intent is saved, a later collection
+reports the incomplete eviction and retains remaining bytes for recovery rather
+than silently declaring cleanup successful or deleting unverified leftovers.

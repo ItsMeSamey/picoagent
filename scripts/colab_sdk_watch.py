@@ -77,7 +77,7 @@ def _training_exit_code(snapshot):
 
 def watch(client, *, project, run_dir, export_root, destination, prune=False,
           interval=120, collect_fn=None, status_fn=None, sleep_fn=None, emit=None,
-          publish_repository=None, approve_public_checkpoints=False):
+          publish_repository=None, approve_public_checkpoints=False, prune_local_published_cache=False):
     """Collect until terminal status, then collect once more before returning.
 
     A checkpoint can be sealed after an earlier collection but before the
@@ -85,10 +85,12 @@ def watch(client, *, project, run_dir, export_root, destination, prune=False,
     that race; the following status read ensures the terminal outcome is still
     current before deciding whether training succeeded.
     """
-    validate_publication_options(publish_repository, approve_public_checkpoints)
+    validate_publication_options(publish_repository, approve_public_checkpoints, prune_local_published_cache)
     publication = ({"publish_repository": publish_repository,
                     "approve_public_checkpoints": approve_public_checkpoints}
                    if publish_repository is not None else {})
+    if prune_local_published_cache:
+        publication["prune_local_published_cache"] = True
     collect_fn = collect if collect_fn is None else collect_fn
     status_fn = status if status_fn is None else status_fn
     sleep_fn = time.sleep if sleep_fn is None else sleep_fn
@@ -117,6 +119,8 @@ def main():
     parser.add_argument('--export-root', default='/content/picoagent-checkpoint-exports')
     parser.add_argument('--off-runtime', action='store_true', required=True)
     parser.add_argument('--prune', action='store_true')
+    parser.add_argument('--prune-local-published-cache', action='store_true',
+                        help='Approve eviction of older published local checkpoint payloads; retain latest')
     parser.add_argument('--publish-repository', help='Publish exact verified checkpoints to public OWNER/REPO')
     parser.add_argument('--approve-public-checkpoints', action='store_true',
                         help='Approve public disclosure of checkpoints and pinned run/source data')
@@ -125,7 +129,7 @@ def main():
                         choices=range(1, MAX_DOWNLOAD_WORKERS + 1),
                         help='Bounded concurrent checkpoint chunk downloads (default: serial)')
     args = parser.parse_args()
-    validate_publication_options(args.publish_repository, args.approve_public_checkpoints)
+    validate_publication_options(args.publish_repository, args.approve_public_checkpoints, args.prune_local_published_cache)
     from picoagent.training.retention import _exclusive_lock
     args.destination.mkdir(parents=True, exist_ok=True)
     client = SDKController(args.session, download_workers=args.download_workers)
@@ -134,7 +138,8 @@ def main():
                           export_root=args.export_root, destination=args.destination,
                           prune=args.prune, interval=args.interval,
                           publish_repository=args.publish_repository,
-                          approve_public_checkpoints=args.approve_public_checkpoints)
+                          approve_public_checkpoints=args.approve_public_checkpoints,
+                          prune_local_published_cache=args.prune_local_published_cache)
     if exit_code:
         raise SystemExit(exit_code)
 

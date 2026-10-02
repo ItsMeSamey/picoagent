@@ -122,7 +122,8 @@ def test_durability_gate_survives_resume_and_precedes_evaluation(tmp_path, monke
 
     run_smoke(tmp_path / "fixture", device="cpu", max_steps=2, checkpoint_before_eval=True)
     config = replace(TrainingConfig.load(tmp_path / "fixture/smoke-config.json"),
-                     output_dir=str(tmp_path / "gated"))
+                     output_dir=str(tmp_path / "gated"), save_steps=100, eval_steps=500,
+                     checkpoint_interval_seconds=600.0)
     waited = []
 
     def timeout(output, checkpoint, timeout_seconds):

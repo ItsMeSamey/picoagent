@@ -313,7 +313,9 @@ finally:
 """)
 
 
-def validate_publication_options(publish_repository, approve_public_checkpoints):
+def validate_publication_options(publish_repository, approve_public_checkpoints, prune_local_published_cache=False):
+    if prune_local_published_cache and not publish_repository:
+        raise ValueError("--prune-local-published-cache requires --publish-repository and --approve-public-checkpoints")
     if publish_repository is not None:
         from github_checkpoint_release import REPO
         if not approve_public_checkpoints:
@@ -401,8 +403,9 @@ print({json.dumps(OUTPUT_SENTINEL)} + json.dumps({{'durability_acknowledged': {r
 
 def collect(client: Colab, project: str, run_dir: str, export_root: str,
             destination: Path, off_runtime: bool, prune: bool = False, *,
-            publish_repository: str | None = None, approve_public_checkpoints: bool = False) -> dict:
-    validate_publication_options(publish_repository, approve_public_checkpoints)
+            publish_repository: str | None = None, approve_public_checkpoints: bool = False,
+            prune_local_published_cache: bool = False) -> dict:
+    validate_publication_options(publish_repository, approve_public_checkpoints, prune_local_published_cache)
     if not off_runtime:
         raise ValueError("--off-runtime is required: a Colab-local copy is not a backup")
     result = client.execute(remote_prelude(project) + f"""
@@ -434,7 +437,20 @@ print({json.dumps(OUTPUT_SENTINEL)} + json.dumps(result))
 """)
     acknowledged = {}
     release_receipts = {}
+    pruned_local = []
+    newest = max((int(item['name'].split('-')[1]) for item in result['exports']), default=-1)
     for bundle in result["exports"]:
+        if prune_local_published_cache and int(bundle['name'].split('-')[1]) < newest:
+            from local_checkpoint_cache import skip_published
+            saved = skip_published(client, destination, bundle, publish_repository)
+            if saved is not None:
+                receipt_path, identity = saved
+                release_receipts[bundle['name']] = receipt_path
+                acknowledged[bundle['name']] = {
+                    key: identity[key] for key in ('checkpoint_manifest_sha256',
+                                                  'run_manifest_sha256', 'transfer_manifest_sha256')}
+                acknowledged[bundle['name']]['evaluation_sha256'] = bundle['evaluation_sha256']
+                continue
         final = pull_checkpoint(bundle["path"].lstrip("/"), destination, client.transfer(),
                                 off_runtime=off_runtime, expected_manifest_sha256=bundle["sha256"],
                                 expected_evaluation_sha256=bundle["evaluation_sha256"])
@@ -443,6 +459,9 @@ print({json.dumps(OUTPUT_SENTINEL)} + json.dumps(result))
         if publish_repository is not None:
             release_receipts[final.name] = publish_collected_checkpoint(
                 client, project, run_dir, destination, bundle, publish_repository)
+        if prune_local_published_cache:
+            from local_checkpoint_cache import prune_published
+            pruned_local.extend(prune_published(destination, bundle, publish_repository, client))
         acknowledged[final.name] = {
             "checkpoint_manifest_sha256": sha256(final / "checkpoint_manifest.json"),
             "run_manifest_sha256": sha256(destination / "run_manifest.json"),
@@ -466,6 +485,7 @@ print({json.dumps(OUTPUT_SENTINEL)} + json.dumps(result))
     return {"verified_checkpoints": list(acknowledged), "destination": str(destination),
             "best_checkpoint": result["best_checkpoint"], "pruned_runtime": pruned,
             "pending_evaluations": pending_evaluations,
+            **({"pruned_local_published_cache": pruned_local} if prune_local_published_cache else {}),
             **({"release_receipts": release_receipts} if publish_repository is not None else {})}
 
 
@@ -530,6 +550,8 @@ def main() -> None:
         command.add_argument("--destination", required=True, type=Path)
         command.add_argument("--off-runtime", action="store_true", required=True)
         command.add_argument("--prune", action="store_true", help="Keep latest two plus best, after host verification")
+        command.add_argument("--prune-local-published-cache", action="store_true",
+                             help="Approve eviction of older locally verified public checkpoint payloads; retain latest")
         command.add_argument("--publish-repository", help="Publish exact verified checkpoints to public OWNER/REPO")
         command.add_argument("--approve-public-checkpoints", action="store_true",
                              help="Approve public disclosure of checkpoints and their pinned run/source data")
@@ -537,7 +559,7 @@ def main() -> None:
             command.add_argument("--interval", type=int, default=60)
     args = parser.parse_args()
     if args.action in {"collect", "watch"}:
-        validate_publication_options(args.publish_repository, args.approve_public_checkpoints)
+        validate_publication_options(args.publish_repository, args.approve_public_checkpoints, args.prune_local_published_cache)
     client = Colab(args.session, args.colab, args.timeout)
     if args.action == "stage":
         result = stage(client, args.source, args.project, args.archive,
@@ -558,7 +580,8 @@ def main() -> None:
                 result = collect(client, args.project, args.run_dir, args.export_root,
                                  args.destination, args.off_runtime, args.prune,
                                  publish_repository=args.publish_repository,
-                                 approve_public_checkpoints=args.approve_public_checkpoints)
+                                 approve_public_checkpoints=args.approve_public_checkpoints,
+                                 prune_local_published_cache=args.prune_local_published_cache)
                 print(json.dumps(result), flush=True)
                 if args.action == "collect":
                     return
