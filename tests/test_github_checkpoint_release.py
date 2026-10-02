@@ -317,3 +317,44 @@ def test_gh_binary_stream_uses_fake_executable_only(tmp_path, monkeypatch):
 def test_anonymous_restore_rejects_unexpected_redirects(url):
     with pytest.raises(ValueError, match="redirect"):
         release.GitHubRedirects().redirect_request(None, None, 302, "", {}, url)
+
+
+@pytest.mark.parametrize('diagnostic,retry', [
+    ('HTTP 502: Bad Gateway', True), ('HTTP 503: Service Unavailable', True),
+    ('connection reset by peer', True), ('unexpected EOF', True),
+    ('HTTP 403: Forbidden', False), ('HTTP 429: quota exceeded', False),
+    ('HTTP 502: permission denied', False), ('authentication failed', False),
+    ('x509 certificate failure', False), ('unknown failure', False),
+])
+def test_cli_transient_failures_are_typed_without_retrying_denials(monkeypatch, diagnostic, retry):
+    import subprocess
+    def fail(*args, **kwargs):
+        raise subprocess.CalledProcessError(1, ['gh'], stderr=diagnostic + ' PRIVATE_URL')
+    monkeypatch.setattr(release, 'run_cli', fail)
+    expected = ConnectionError if retry else subprocess.CalledProcessError
+    with pytest.raises(expected) as raised:
+        release.GitHub('test-owner/test-repo').call('api', 'fixture')
+    if retry:
+        assert 'PRIVATE_URL' not in str(raised.value)
+
+
+@pytest.mark.parametrize('diagnostic,code,error_type', [
+    (b'connection reset by peer PRIVATE_URL', 1, ConnectionError),
+    (b'HTTP 403: Forbidden PRIVATE_URL', 1, ValueError),
+    (b'', 0, ValueError),
+])
+def test_truncated_readback_retries_only_confirmed_transport(monkeypatch, diagnostic, code, error_type):
+    class Process:
+        pid = 123456
+        stdout = io.BytesIO(b'short')
+        def wait(self, timeout=None):
+            return code
+    def popen(*args, **kwargs):
+        kwargs['stderr'].write(diagnostic)
+        return Process()
+    monkeypatch.setattr(release.subprocess, 'Popen', popen)
+    monkeypatch.setattr(release.os, 'killpg', lambda *args: None)
+    with pytest.raises(error_type) as raised:
+        with release.GitHub('test-owner/test-repo').stream({'id': 1}) as stream:
+            release.readback(stream, {'bytes': 100, 'sha256': 'a' * 64})
+    assert 'PRIVATE_URL' not in str(raised.value)

@@ -1,0 +1,35 @@
+{
+  "schema": "picoagent.validation.async-checkpoints.v1",
+  "date_utc": "2026-10-02",
+  "status": "local_validation_only_not_live_training",
+  "policy": {
+    "requested_interval_seconds": 1800,
+    "intermediate_local_limit": 2,
+    "final_reserved_slots": 1,
+    "blocking_public_ack": false,
+    "retention": "explicit_latest_verified_public_replacement"
+  },
+  "checks": {
+    "trainer_worker_cpu_tests": 53,
+    "trainer_subtests": 23,
+    "controller_worker_tests": 125,
+    "independent_focused_tests": 112,
+    "independent_final_publication_retention_tests": 56,
+    "final_cpu_async_efficiency_transaction_tests": 23,
+    "final_controller_tests": 107,
+    "status_exposure_tests": 16,
+    "ruff": "passed",
+    "whitespace": "passed",
+    "full_suite_passed": 723,
+    "full_suite_skipped": 41,
+    "full_suite_subtests": 44,
+    "production_prepared_admission": "passed_cpu_only"
+  },
+  "limitations": [
+    "No live runtime allocated or trained for this policy",
+    "No denied checkpoint upload retried or rerouted",
+    "No existing checkpoint deleted",
+    "Bounded backlog coalesces if publication cannot keep up; cadence is requested not guaranteed durability",
+    "Final-space failure is explicit; conservative reservation is not a filesystem quota"
+  ]
+}

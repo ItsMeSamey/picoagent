@@ -227,7 +227,8 @@ def _changed_runtime_evaluations(run: Path, acknowledged: dict[str, dict]) -> li
 
 
 def prune_runtime_exports(run_dir: Path, export_root: Path, acknowledged: dict[str, dict],
-                          best_checkpoint: str | None) -> dict[str, Any]:
+                          best_checkpoint: str | None, *,
+                          latest_published_repository: str | None = None) -> dict[str, Any]:
     """Prune only paired, acknowledged checkpoint/export trees, latest two + best.
 
     Validate the whole plan before deleting anything and recheck each pair at
@@ -258,7 +259,34 @@ def prune_runtime_exports(run_dir: Path, export_root: Path, acknowledged: dict[s
                       key=lambda path: int(path.name.split("-")[1]))
 
     current = checkpoints()
+    latest_public = current[-1].name if current and latest_published_repository else None
+
+    def verify_public(name):
+        from picoagent.training.durability import acknowledgement_from_receipt
+        path = run / 'durability' / (name + '.json')
+        if (path.parent.is_symlink() or path.is_symlink() or not path.is_file()
+                or path.stat().st_size > 2 * 1024**2):
+            raise ValueError('Latest-only retention requires verified public acknowledgements')
+        ack = json.loads(path.read_text())
+        if ack != acknowledgement_from_receipt(ack.get('receipt', {})):
+            raise ValueError('Public acknowledgement integrity mismatch')
+        identity = ack['receipt']['identity']
+        if (identity['repository'] != latest_published_repository or identity['checkpoint'] != name
+                or any(identity[key] != acknowledged[name][key] for key in
+                       ('run_manifest_sha256', 'checkpoint_manifest_sha256', 'transfer_manifest_sha256'))):
+            raise ValueError('Public acknowledgement does not match collected checkpoint')
+        _runtime_prune_pair(run, exports, name, acknowledged[name])
+
+    if latest_public is not None:
+        # A newer save racing collection is unverified. Do not delete anything
+        # until a subsequent collection publishes that exact replacement.
+        if latest_public not in acknowledged:
+            return {'pruned_runtime': [], 'pending_evaluations': []}
+        for name in acknowledged:
+            verify_public(name)
     keep = {path.name for path in current[-2:]} | ({best_checkpoint} if best_checkpoint else set())
+    if latest_public is not None:
+        keep = {latest_public}
     candidates = [path.name for path in current if path.name in acknowledged and path.name not in keep]
     result = {"pruned_runtime": [], "pending_evaluations": []}
 
@@ -277,7 +305,13 @@ def prune_runtime_exports(run_dir: Path, export_root: Path, acknowledged: dict[s
             raise ValueError("Runtime retention roots changed before deletion")
         # Never expand a plan when newer checkpoints appear, or delete a path
         # that became one of the latest two after a concurrent removal.
-        if name in {path.name for path in checkpoints()[-2:]}:
+        now = checkpoints()
+        if latest_public is not None:
+            if not now or now[-1].name != latest_public:
+                break
+            verify_public(latest_public)
+            verify_public(name)
+        if name in {path.name for path in now[-(1 if latest_public else 2):]}:
             continue
         if deferred():
             break

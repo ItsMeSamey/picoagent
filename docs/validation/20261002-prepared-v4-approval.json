@@ -1,0 +1,25 @@
+{
+  "schema": "picoagent.prepared_tokens.review_approval.v1",
+  "date_utc": "2026-10-02",
+  "status": "approved_for_separately_named_new_run",
+  "prepared_manifest": "data/prepared-native-training-plans-v4/manifest.json",
+  "prepared_manifest_sha256": "24f2572dab280cfeb4d6706d7181ac9d5d5d153713d53c7aee18e83f8b9ece55",
+  "raw_source_manifest_sha256": "e5774693bc42815ab44858754303b3970c7e34f26a1140425dccdd5853ccfbd9",
+  "core_python_files": 46,
+  "core_source_map_sha256": "5a47ada8d33f0723d85dd70ac94c0577050c37e61ac3997619268e66e502bff1",
+  "independent_review_report": "docs/validation/20261002-prepared-v4-independent-review.json",
+  "independent_review_sha256": "151cdd2b830d791d4138cf93547c69d3a08b3e69595ed5277f9434f87fe38e1a",
+  "review_basis": [
+    "Fresh raw CPU rebuild with original reviewed tokenizer bytes",
+    "Separate reviewer reran independent stdlib decoder across all 49,905 ordered arrays against original raw profile",
+    "All 83 payloads byte-identical to approved v3",
+    "All 528 raw inventory file hashes and 46 current core source hashes independently verified",
+    "Only manifest change versus v3 is conservative transform identity"
+  ],
+  "new_config": "configs/smol360m_native_t4_async_30min_v4.json",
+  "limitations": [
+    "Data admission only; not model quality evidence",
+    "Original artifacts preserved; identity checks unchanged",
+    "No runtime allocation or publication authorization implied"
+  ]
+}

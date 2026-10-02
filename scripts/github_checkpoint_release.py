@@ -169,6 +169,29 @@ def readback(stream, record, output=None):
         raise ValueError("Read-back asset integrity mismatch")
 
 
+def _transient_cli_failure(error):
+    """Classify known gh outages without exposing stderr or retrying denials."""
+    if isinstance(error, subprocess.TimeoutExpired):
+        return True
+    if not isinstance(error, subprocess.CalledProcessError):
+        return False
+    diagnostic = error.stderr
+    if isinstance(diagnostic, bytes):
+        diagnostic = diagnostic.decode('utf-8', errors='replace')
+    if not isinstance(diagnostic, str):
+        return False
+    diagnostic = diagnostic.lower()
+    if any(term in diagnostic for term in ('denied', 'forbidden', 'unauthorized', 'quota',
+                                          'rate limit', 'authentication', 'certificate', 'permission')):
+        return False
+    statuses = re.findall(r'http(?:/\d(?:\.\d)?)?\s+(\d{3})\b', diagnostic)
+    if statuses:
+        return all(int(status) in {408, 500, 502, 503, 504} for status in statuses)
+    return any(term in diagnostic for term in ('connection reset', 'connection refused',
+                    'i/o timeout', 'tls handshake timeout', 'context deadline exceeded',
+                    'temporary failure in name resolution', 'no such host', 'unexpected eof'))
+
+
 class GitHub:
     """Only the official controller CLI handles authenticated GitHub requests."""
     def __init__(self, repository):
@@ -176,7 +199,14 @@ class GitHub:
         self.prefix = f"repos/{repository}"
 
     def call(self, *args):
-        return run_cli(["gh", *args], timeout=600, capture=True).stdout
+        try:
+            return run_cli(["gh", *args], timeout=600, capture=True).stdout
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
+            if _transient_cli_failure(error):
+                # Retrying the collection first inventories the existing release
+                # and assets; an ambiguous successful write is never clobbered.
+                raise ConnectionError('Transient GitHub CLI transport failure') from None
+            raise
 
     def api(self, path):
         return json.loads(self.call("api", "--hostname", "github.com", "--method", "GET", path))
@@ -227,24 +257,50 @@ class GitHub:
     def stream(self, asset):
         argv = ["gh", "api", "--hostname", "github.com", "--method", "GET",
                 f"{self.prefix}/releases/assets/{asset['id']}", "-H", "Accept: application/octet-stream"]
-        process = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                                   stderr=subprocess.DEVNULL, start_new_session=True)
-        def stop():
+        # Keep diagnostics private; inspect only a bounded tail after the child
+        # exits. A file avoids pipe backpressure while stdout streams assets.
+        with tempfile.TemporaryFile() as diagnostic:
+            process = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                       stderr=diagnostic, start_new_session=True)
+            timed_out = threading.Event()
+            def stop():
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+            def timeout():
+                timed_out.set()
+                stop()
+            timer = threading.Timer(600, timeout)
+            timer.start()
             try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-        timer = threading.Timer(600, stop)
-        timer.start()
-        try:
-            yield process.stdout
-            if process.wait(timeout=5):
-                raise RuntimeError("GitHub read-back failed")
-        finally:
-            timer.cancel()
-            stop()
-            process.stdout.close()
-            process.wait()
+                read_error = None
+                try:
+                    yield process.stdout
+                except Exception as error:
+                    read_error = error
+                try:
+                    code = process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    # A consumer can reject bytes before EOF. Preserve that
+                    # integrity error, rather than turning it into a retry.
+                    if read_error is not None:
+                        raise read_error
+                    raise
+                diagnostic.seek(0, os.SEEK_END)
+                diagnostic.seek(max(0, diagnostic.tell() - 16384))
+                failure = subprocess.CalledProcessError(code, argv, stderr=diagnostic.read())
+                if timed_out.is_set() or (code and _transient_cli_failure(failure)):
+                    raise ConnectionError('Transient GitHub read-back transport failure') from None
+                if read_error is not None:
+                    raise read_error
+                if code:
+                    raise RuntimeError('GitHub read-back failed')
+            finally:
+                timer.cancel()
+                stop()
+                process.stdout.close()
+                process.wait()
 
 
 def asset_inventory(client, release, plan):

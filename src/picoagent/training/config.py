@@ -31,6 +31,8 @@ class TrainingConfig:
     eval_steps: int | None = None
     checkpoint_before_eval: bool = False
     checkpoint_interval_seconds: float | None = 300.0
+    async_checkpoint_upload: bool = False
+    async_checkpoint_max_local: int = 2
     logging_steps: int = 10
     seed: int = 20261001
     deterministic: bool = True
@@ -47,9 +49,15 @@ class TrainingConfig:
         for key in ("model_id", "dataset_manifest", "output_dir"):
             if not isinstance(getattr(self, key), str) or not getattr(self, key).strip():
                 raise ValueError(f"{key} must be a nonempty string")
-        for key in ("gradient_checkpointing", "deterministic", "smoke_test", "allow_native_teacher_observed", "allow_artificial_action_plans", "checkpoint_before_eval"):
+        for key in ("gradient_checkpointing", "deterministic", "smoke_test", "allow_native_teacher_observed", "allow_artificial_action_plans", "checkpoint_before_eval", "async_checkpoint_upload"):
             if not isinstance(getattr(self, key), bool):
                 raise ValueError(f"{key} must be a boolean")
+        if type(self.async_checkpoint_max_local) is not int or self.async_checkpoint_max_local < 2:
+            raise ValueError("async_checkpoint_max_local must be an integer >= 2")
+        if self.async_checkpoint_upload and self.checkpoint_interval_seconds is None:
+            raise ValueError("async_checkpoint_upload requires checkpoint_interval_seconds")
+        if self.async_checkpoint_upload and not self.checkpoint_before_eval:
+            raise ValueError("async_checkpoint_upload requires checkpoint_before_eval")
         if self.device not in {"auto", "cpu", "cuda", "xla"}:
             raise ValueError("device must be auto, cpu, cuda, or xla")
         if self.eval_steps is not None and (type(self.eval_steps) is not int or self.eval_steps <= 0):

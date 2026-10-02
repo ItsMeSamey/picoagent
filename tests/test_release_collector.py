@@ -164,3 +164,86 @@ def test_missing_runtime_ack_reverifies_before_retry(collection):
     collect(approve_public_checkpoints=True)
     assert len(github.reads) > reads
     assert (run / 'durability/checkpoint-7.json').is_file()
+
+
+def test_latest_public_retention_progresses_four_cycles_and_preserves_failed_replacement(prepared, monkeypatch, tmp_path):  # noqa: F811
+    from test_runtime_export_retention import make_checkpoint
+    run, manifest, _ = prepared
+    client, servers = Controller(), {}
+    original = release.upload_checkpoint
+
+    def fake_publish(run_dir, manifest_path, plan, **kwargs):
+        github = servers.setdefault(plan['identity']['checkpoint'], FakeGitHub())
+        return original(run_dir, manifest_path, plan, client=github,
+                        public_opener=FakePublicHTTP(github), **kwargs)
+
+    monkeypatch.setattr(release, 'upload_checkpoint', fake_publish)
+
+    def collect():
+        return controller.collect(client, str(Path(__file__).resolve().parents[1]), str(run),
+                                  str(manifest.parent.parent), tmp_path / 'durable', True, True,
+                                  publish_repository='test-owner/test-repo', approve_public_checkpoints=True,
+                                  prune_to_latest_published=True)
+
+    collect()
+    for step in range(8, 12):
+        make_checkpoint(run, step)
+        if step == 9:
+            servers['checkpoint-9'] = FakeGitHub()
+            servers['checkpoint-9'].fail_upload_number = 2
+            with pytest.raises(ConnectionError):
+                collect()
+            assert (run / 'checkpoint-8').is_dir()
+            assert (run / 'checkpoint-9').is_dir()
+            assert not (run / 'durability/checkpoint-9.json').exists()
+            servers['checkpoint-9'].fail_upload_number = None
+        result = collect()
+        assert result['pruned_runtime'] == [f'checkpoint-{step - 1}']
+        assert [p.name for p in run.glob('checkpoint-*')] == [f'checkpoint-{step}']
+        assert servers[f'checkpoint-{step}'].current['draft'] is False
+
+
+def test_latest_public_retention_rejects_local_only_before_any_remote_call(tmp_path):
+    client = Controller()
+    with pytest.raises(ValueError, match='publish-repository'):
+        controller.collect(client, '/p', '/r', '/e', tmp_path, True, True,
+                           prune_to_latest_published=True)
+    assert client.calls == []
+
+
+@pytest.mark.parametrize('race', ['before_prune', 'during_prune'])
+def test_latest_public_retention_racing_checkpoint_preserves_verified_predecessor(prepared, monkeypatch, tmp_path, race):  # noqa: F811
+    import checkpoint_sync as sync
+    from test_runtime_export_retention import make_checkpoint
+    run, manifest, _ = prepared
+    client, servers = Controller(), {}
+    original_upload = release.upload_checkpoint
+    def fake_publish(run_dir, manifest_path, plan, **kwargs):
+        github = servers.setdefault(plan['identity']['checkpoint'], FakeGitHub())
+        return original_upload(run_dir, manifest_path, plan, client=github,
+                               public_opener=FakePublicHTTP(github), **kwargs)
+    monkeypatch.setattr(release, 'upload_checkpoint', fake_publish)
+    make_checkpoint(run, 8)
+    make_checkpoint(run, 9)
+    if race == 'before_prune':
+        original = sync.prune_runtime_exports
+        def racing_prune(*args, **kwargs):
+            make_checkpoint(run, 10)
+            return original(*args, **kwargs)
+        monkeypatch.setattr(sync, 'prune_runtime_exports', racing_prune)
+    else:
+        original = sync.shutil.rmtree
+        def racing_delete(path, *args, **kwargs):
+            if Path(path) == run / 'checkpoint-7':
+                make_checkpoint(run, 10)
+            return original(path, *args, **kwargs)
+        monkeypatch.setattr(sync.shutil, 'rmtree', racing_delete)
+    result = controller.collect(client, str(Path(__file__).resolve().parents[1]), str(run),
+                                str(manifest.parent.parent), tmp_path / 'durable', True, True,
+                                publish_repository='test-owner/test-repo', approve_public_checkpoints=True,
+                                prune_to_latest_published=True)
+    assert result['pruned_runtime'] == ([] if race == 'before_prune' else ['checkpoint-7'])
+    assert (run / 'checkpoint-8').is_dir()
+    assert (run / 'checkpoint-9').is_dir()
+    assert (run / 'checkpoint-10').is_dir()
+    assert not (run / 'durability/checkpoint-10.json').exists()

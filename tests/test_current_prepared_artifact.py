@@ -12,7 +12,11 @@ from picoagent.training.prepared_approvals import APPROVED_PREPARED_MANIFESTS
 
 def test_current_full_run_prepared_artifact_matches_entire_core_source():
     root = Path(__file__).resolve().parents[1]
-    config = json.loads((root / 'configs/smol360m_native_t4_prepared_v3_durable.json').read_text())
+    config = json.loads((root / 'configs/smol360m_native_t4_async_30min_v4.json').read_text())
+    assert config['async_checkpoint_upload'] is True
+    assert config['async_checkpoint_max_local'] == 2
+    assert config['checkpoint_interval_seconds'] == 1800.0
+    assert config['output_dir'] == 'runs/smol360m-native-t4-async-30min-v4'
     path = root / config['prepared_manifest']
     data = path.read_bytes()
     digest = hashlib.sha256(data).hexdigest()

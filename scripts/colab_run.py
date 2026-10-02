@@ -215,8 +215,10 @@ from pathlib import Path
 run = Path({json.dumps(run_dir)})
 status_file = run / 'run_status.json'
 job_file = Path({json.dumps(project)}) / '.picoagent-job.json'
+upload_file = run / 'checkpoint_upload_status.json'
 result = {{'job_status': json.loads(job_file.read_text()) if job_file.exists() else None,
           'run_status': json.loads(status_file.read_text()) if status_file.exists() else None,
+          'checkpoint_upload_status': json.loads(upload_file.read_text()) if upload_file.exists() else None,
           'checkpoints': sorted(p.name for p in run.glob('checkpoint-*') if (p / 'checkpoint_manifest.json').exists())}}
 print({json.dumps(OUTPUT_SENTINEL)} + json.dumps(result))
 """)
@@ -431,8 +433,11 @@ print({json.dumps(OUTPUT_SENTINEL)} + json.dumps({{'durability_acknowledged': {r
 def collect(client: Colab, project: str, run_dir: str, export_root: str,
             destination: Path, off_runtime: bool, prune: bool = False, *,
             publish_repository: str | None = None, approve_public_checkpoints: bool = False,
-            prune_local_published_cache: bool = False, upload_workers: int = 1) -> dict:
+            prune_local_published_cache: bool = False, upload_workers: int = 1,
+            prune_to_latest_published: bool = False) -> dict:
     validate_publication_options(publish_repository, approve_public_checkpoints, prune_local_published_cache, upload_workers)
+    if prune_to_latest_published and (not prune or publish_repository is None):
+        raise ValueError('--prune-to-latest-published requires --prune and --publish-repository')
     if not off_runtime:
         raise ValueError("--off-runtime is required: a Colab-local copy is not a backup")
     result = client.execute(remote_prelude(project) + f"""
@@ -505,7 +510,8 @@ print({json.dumps(OUTPUT_SENTINEL)} + json.dumps(result))
 from pathlib import Path
 from checkpoint_sync import prune_runtime_exports
 result = prune_runtime_exports(Path({json.dumps(run_dir)}), Path({json.dumps(export_root)}),
-                               {repr(acknowledged)}, {repr(result['best_checkpoint'])})
+                               {repr(acknowledged)}, {repr(result['best_checkpoint'])},
+                               latest_published_repository={repr(publish_repository if prune_to_latest_published else None)})
 print({json.dumps(OUTPUT_SENTINEL)} + json.dumps(result))
 """)
         pruned = remote_result["pruned_runtime"]

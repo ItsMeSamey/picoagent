@@ -80,3 +80,47 @@ def test_run_failure_without_supervisor_return_code_still_fails_watch():
         "job_status": {"status": "failed", "returncode": -9},
         "run_status": {"status": "failed"},
     }) == 137
+
+
+def test_transient_collection_and_terminal_status_retry_without_losing_final_drain():
+    import json
+    attempts, sleeps, output = [], [], []
+    failures = [ConnectionError, TimeoutError, ConnectionError, ConnectionError, None, None]
+    statuses = [ConnectionError, {'run_status': {'status': 'completed'}},
+                {'run_status': {'status': 'completed'}}]
+
+    def collect(*args):
+        failure = failures.pop(0)
+        attempts.append('collect')
+        if failure:
+            raise failure('PRIVATE_URL_NOT_LOGGED')
+        return {'verified_checkpoints': ['checkpoint-9']}
+
+    def status(*args):
+        value = statuses.pop(0)
+        if value is ConnectionError:
+            raise value('PRIVATE_URL_NOT_LOGGED')
+        return value
+
+    assert watch_module.watch(object(), project='/p', run_dir='/r', export_root='/e',
+                              destination=Path('/d'), collect_fn=collect, status_fn=status,
+                              sleep_fn=sleeps.append, emit=output.append, retry_max_seconds=25) == 0
+    assert sleeps == [10, 20, 25, 25, 10]
+    assert len(attempts) == 6
+    assert 'PRIVATE_URL_NOT_LOGGED' not in ''.join(output)
+    assert sum(json.loads(value).get('controller_retry', False) for value in output) == 5
+
+
+def test_permission_quota_and_integrity_errors_never_retry():
+    import pytest
+    from types import SimpleNamespace
+    for error in [ValueError('hash mismatch'), PermissionError('denied'),
+                  RuntimeError('remote execution failed')]:
+        assert not watch_module._retryable_transport_error(error)
+    for status in (401, 403, 404, 429):
+        error = ConnectionError('private response')
+        error.response = SimpleNamespace(status_code=status)
+        assert not watch_module._retryable_transport_error(error)
+    with pytest.raises(ValueError):
+        watch_module.watch(object(), project='/p', run_dir='/r', export_root='/e',
+                           destination=Path('/d'), prune=True, prune_to_latest_published=True)

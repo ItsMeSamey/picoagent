@@ -82,3 +82,66 @@ def save_checkpoint_transaction(output: Path, step: int, save: Callable[[Path], 
         os.close(descriptor)
     staging_root.rmdir()
     return destination
+
+
+class AsyncCheckpointSchedule:
+    """Bound sealed local snapshots without touching an upload's immutable input.
+
+    The external uploader owns publication and verified retention. When it is
+    slow or unavailable we coalesce intermediate requests, rather than block
+    training, delete snapshots, or queue mutable tensor references. One extra
+    local slot is reserved for a final (or explicit segment-end) snapshot.
+    """
+
+    def __init__(self, output: Path, interval_seconds: float, pending_limit: int):
+        self.output = output
+        self.timer = CheckpointTimer(interval_seconds)
+        self.pending_limit = pending_limit
+        self.coalesced_requests = 0
+        self.last_checkpoint: str | None = None
+        self.last_error: str | None = None
+        self.blocked_reason: str | None = None
+
+    def begin(self) -> None:
+        self.timer.mark_saved()
+
+    def local_checkpoints(self) -> list[Path]:
+        import re
+        return sorted((p for p in self.output.glob("checkpoint-*")
+                       if re.fullmatch(r"checkpoint-[0-9]+", p.name)
+                       and (p.is_dir() or p.is_symlink())),
+                      key=lambda p: int(p.name.split("-")[1]))
+
+    def should_save(self, *, boundary: bool = False) -> bool:
+        if boundary:
+            return True
+        if not self.timer.due():
+            return False
+        if len(self.local_checkpoints()) >= self.pending_limit:
+            self.coalesced_requests += 1
+            self.blocked_reason = "local_checkpoint_backlog"
+            # Coalesce one interval at a time, not one status write per step.
+            self.timer.mark_saved()
+            return False
+        self.blocked_reason = None
+        return True
+
+    def coalesce_space(self, error: OSError) -> None:
+        self.coalesced_requests += 1
+        self.blocked_reason = "insufficient_checkpoint_space"
+        self.last_error = str(error)
+        self.timer.mark_saved()
+
+    def saved(self, checkpoint: str) -> None:
+        self.last_checkpoint = checkpoint
+        self.blocked_reason = None
+        self.timer.mark_saved()
+
+    def status(self) -> dict:
+        checkpoints = self.local_checkpoints()
+        return {"mode": "asynchronous_external_upload", "status": "coalesced" if self.blocked_reason else "ready",
+                "local_checkpoint_count": len(checkpoints), "local_checkpoint_limit": self.pending_limit,
+                "final_checkpoint_reserved_slots": 1, "coalesced_checkpoint_requests": self.coalesced_requests,
+                "blocked_reason": self.blocked_reason, "last_space_error": self.last_error,
+                "last_sealed_checkpoint": self.last_checkpoint or (checkpoints[-1].name if checkpoints else None),
+                "backup_status": "not_asserted; consult independently verified controller receipts"}

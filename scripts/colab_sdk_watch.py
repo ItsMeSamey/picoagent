@@ -75,10 +75,33 @@ def _training_exit_code(snapshot):
     return min(255, returncode)
 
 
+def _retryable_transport_error(error):
+    """Retry transport outages only, never permission/quota/integrity failures."""
+    from urllib.error import HTTPError, URLError
+    status = (error.code if isinstance(error, HTTPError) else
+              getattr(getattr(error, 'response', None), 'status_code', None))
+    if status is not None:
+        return type(status) is int and status in {408, 500, 502, 503, 504}
+    if isinstance(error, URLError):
+        return isinstance(error.reason, (ConnectionError, TimeoutError))
+    if isinstance(error, (ConnectionError, TimeoutError)):
+        return True
+    # Optional vendor dependencies remain unnecessary for local CPU tests.
+    classes = {(base.__module__.split('.')[0], base.__name__)
+               for base in type(error).__mro__}
+    if any(name in {'SSLError', 'SSLCertVerificationError'} for _, name in classes):
+        return False
+    return bool(classes & {('requests', 'ConnectionError'), ('requests', 'Timeout'),
+                           ('httpx', 'TransportError'),
+                           ('websocket', 'WebSocketConnectionClosedException'),
+                           ('websocket', 'WebSocketTimeoutException')})
+
+
 def watch(client, *, project, run_dir, export_root, destination, prune=False,
           interval=120, collect_fn=None, status_fn=None, sleep_fn=None, emit=None,
           publish_repository=None, approve_public_checkpoints=False, prune_local_published_cache=False,
-          upload_workers=1, stop_file=None):
+          upload_workers=1, stop_file=None, retry_max_seconds=300,
+          prune_to_latest_published=False):
     """Collect until terminal status, then collect once more before returning.
 
     A checkpoint can be sealed after an earlier collection but before the
@@ -87,9 +110,15 @@ def watch(client, *, project, run_dir, export_root, destination, prune=False,
     current before deciding whether training succeeded.
     """
     validate_publication_options(publish_repository, approve_public_checkpoints, prune_local_published_cache, upload_workers)
+    if type(retry_max_seconds) not in (int, float) or not 10 <= retry_max_seconds <= 3600:
+        raise ValueError('retry_max_seconds must be between 10 and 3600')
+    if prune_to_latest_published and (not prune or publish_repository is None):
+        raise ValueError('--prune-to-latest-published requires --prune and --publish-repository')
     publication = ({"publish_repository": publish_repository,
                     "approve_public_checkpoints": approve_public_checkpoints}
                    if publish_repository is not None else {})
+    if prune_to_latest_published:
+        publication['prune_to_latest_published'] = True
     if upload_workers != 1:
         publication["upload_workers"] = upload_workers
     if prune_local_published_cache:
@@ -105,19 +134,43 @@ def watch(client, *, project, run_dir, export_root, destination, prune=False,
             return True
         return False
 
+    def retry(operation, phase):
+        delay = min(10, retry_max_seconds)
+        while True:
+            try:
+                return operation()
+            except Exception as error:
+                if not _retryable_transport_error(error):
+                    raise
+                # A stop requested during failure must not imply a completed
+                # collection or acknowledgement. Leave resumable chunks intact.
+                if stop_file is not None and Path(stop_file).exists():
+                    raise
+                emit(json.dumps({'controller_retry': True, 'phase': phase,
+                                 'error_type': type(error).__name__, 'retry_seconds': delay}))
+                sleep_fn(delay)
+                delay = min(retry_max_seconds, delay * 2)
+
+    def collect_once():
+        return retry(lambda: collect_fn(client, project, run_dir, export_root, destination,
+                                       True, prune, **publication), 'collection')
+
+    def status_once():
+        return retry(lambda: status_fn(client, project, run_dir), 'status')
+
     while True:
-        result = collect_fn(client, project, run_dir, export_root, destination, True, prune, **publication)
+        result = collect_once()
         emit(json.dumps(result))
         if stop_requested():
             return 0
-        current = status_fn(client, project, run_dir)
+        current = status_once()
         emit(json.dumps(current))
         if _terminal_status(current):
-            final_result = collect_fn(client, project, run_dir, export_root, destination, True, prune, **publication)
+            final_result = collect_once()
             emit(json.dumps(final_result))
             if stop_requested():
                 return 0
-            final_status = status_fn(client, project, run_dir)
+            final_status = status_once()
             emit(json.dumps(final_status))
             if _terminal_status(final_status):
                 return _training_exit_code(final_status)
@@ -133,6 +186,10 @@ def main():
     parser.add_argument('--export-root', default='/content/picoagent-checkpoint-exports')
     parser.add_argument('--off-runtime', action='store_true', required=True)
     parser.add_argument('--prune', action='store_true')
+    parser.add_argument('--prune-to-latest-published', action='store_true',
+                        help='Retain only latest runtime checkpoint after verified public publication')
+    parser.add_argument('--retry-max-seconds', type=int, default=300,
+                        help='Maximum transient transport retry delay (10–3600 seconds)')
     parser.add_argument('--prune-local-published-cache', action='store_true',
                         help='Approve eviction of older published local checkpoint payloads; retain latest')
     parser.add_argument('--publish-repository', help='Publish exact verified checkpoints to public OWNER/REPO')
@@ -155,6 +212,8 @@ def main():
         exit_code = watch(client, project=args.project, run_dir=args.run_dir,
                           export_root=args.export_root, destination=args.destination,
                           prune=args.prune, interval=args.interval,
+                          prune_to_latest_published=args.prune_to_latest_published,
+                          retry_max_seconds=args.retry_max_seconds,
                           publish_repository=args.publish_repository,
                           approve_public_checkpoints=args.approve_public_checkpoints,
                           prune_local_published_cache=args.prune_local_published_cache,

@@ -19,7 +19,8 @@ def run_smoke(output_dir: str | Path, *, device: str = "cpu", segment_steps: int
               save_steps: int = 1, checkpoint_interval_seconds: float | None = 300.0,
               max_steps: int = 2, eval_steps: int | None = None,
               checkpoint_before_eval: bool = False, continue_through_checkpoints: bool = False,
-              dropout: float = 0.0) -> dict[str, Any]:
+              dropout: float = 0.0, async_checkpoint_upload: bool = False,
+              async_checkpoint_max_local: int = 2) -> dict[str, Any]:
     if device not in {"cpu", "cuda", "xla"}:
         raise ValueError("Smoke device must be explicit: cpu, cuda, or xla")
     if type(train_records) is not int or train_records < 2:
@@ -87,6 +88,7 @@ def run_smoke(output_dir: str | Path, *, device: str = "cpu", segment_steps: int
         gradient_accumulation_steps=gradient_accumulation_steps, gradient_checkpointing=True, learning_rate=1e-3,
         max_steps=max_steps, save_steps=save_steps, checkpoint_interval_seconds=checkpoint_interval_seconds,
         eval_steps=eval_steps, checkpoint_before_eval=checkpoint_before_eval,
+        async_checkpoint_upload=async_checkpoint_upload, async_checkpoint_max_local=async_checkpoint_max_local,
         logging_steps=1, precision="auto", device=device, seed=7, smoke_test=True)
     (root / "smoke-config.json").write_text(canonical_json(config.as_dict()) + "\n")
     result = run_training(config, segment_steps=segment_steps,

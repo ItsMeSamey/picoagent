@@ -28,6 +28,17 @@ class LocalExecution:
         return json.loads(lines[0][len(controller.OUTPUT_SENTINEL):])
 
 
+def test_status_exposes_async_backlog_without_claiming_upload(tmp_path):
+    run = tmp_path / 'run'
+    run.mkdir()
+    backlog = {'status': 'coalesced', 'coalesced_checkpoint_requests': 2,
+               'last_sealed_checkpoint': 'checkpoint-100'}
+    (run / 'checkpoint_upload_status.json').write_text(json.dumps(backlog))
+    result = controller.status(LocalExecution(), str(tmp_path), str(run))
+    assert result['checkpoint_upload_status'] == backlog
+    assert result['run_status'] is None
+
+
 @pytest.mark.parametrize('foreground', [False, True])
 @pytest.mark.parametrize('returncode', [0, 17])
 def test_foreground_waits_only_after_lock_release_preserving_supervisor_state(

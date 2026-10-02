@@ -191,3 +191,19 @@ The older run's checkpoints cannot resume under this changed identity.
 See [exact CPU-prepared tokens](../docs/prepared_training_tokens.md), the
 [independent equivalence report](../docs/validation/20261001-prepared-equivalence.json)
 and the [separate approval record](../docs/validation/20261001-prepared-approval.json).
+
+### Current fresh-run asynchronous 30-minute preset
+
+`smol360m_native_t4_async_30min_v4.json` is the designated fresh-run preset.
+It requests coherent snapshots every 1,800 seconds at completed optimizer
+steps, with background external collection/publication and no blocking step-1
+backup gate. The two-snapshot intermediate backlog is bounded: a slow or
+unavailable destination causes explicitly reported coalescing, not unbounded
+disk growth. A final checkpoint slot is reserved. Latest-only runtime cleanup
+requires explicit controller mode and independently verified newer public
+publication. Historical configurations and checkpoints are not migrated.
+
+See [the asynchronous workflow](../docs/async_checkpoint_workflow.md) for
+launch prerequisites, full-run command, space limits and separate publication
+completion. `smol360m_native_t4_async_30min_raw.json` is the raw CPU preparation
+input; use the prepared v4 preset for production.

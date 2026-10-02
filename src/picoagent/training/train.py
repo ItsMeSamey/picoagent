@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .config import TrainingConfig, select_precision
-from .checkpointing import CheckpointTimer, save_checkpoint_transaction
+from .checkpointing import AsyncCheckpointSchedule, CheckpointTimer, save_checkpoint_transaction
 from .data import sha256_file, verify_dataset
 from .encoding import AssistantOnlyCollator, encode_records
 from .device import resolve_device
@@ -39,7 +39,7 @@ def _tree_bytes(root: Path) -> int:
 
 
 def _output_budget_reservation(output: Path, *, parameters: int, budget_bytes: int,
-                              budget_root: Path | None = None) -> dict[str, int]:
+                              budget_root: Path | None = None, checkpoint_copies: int = 1, export_copies: int = 0) -> dict[str, int]:
     """Conservatively reserve room for the next full checkpoint and final model.
 
     For full SFT, one full checkpoint needs FP32 model weights and Adam's two
@@ -50,6 +50,10 @@ def _output_budget_reservation(output: Path, *, parameters: int, budget_bytes: i
     """
     if type(budget_bytes) is not int or budget_bytes <= 0:
         raise ValueError("output_budget_bytes must be a positive integer")
+    if type(checkpoint_copies) is not int or checkpoint_copies < 1:
+        raise ValueError("checkpoint_copies must be a positive integer")
+    if type(export_copies) is not int or export_copies < 0:
+        raise ValueError("export_copies must be a nonnegative integer")
     parameter_bytes = parameters * 4
     checkpoint_reserve = math.ceil(parameter_bytes * 3.25) + 512 * 1024 * 1024
     final_model_reserve = parameter_bytes
@@ -59,23 +63,23 @@ def _output_budget_reservation(output: Path, *, parameters: int, budget_bytes: i
     if output != counted_root and not output.is_relative_to(counted_root):
         raise ValueError("output budget root must contain the training output directory")
     existing_bytes = _tree_bytes(counted_root)
-    projected = existing_bytes + checkpoint_reserve + final_model_reserve + margin
+    projected = existing_bytes + checkpoint_reserve * (checkpoint_copies + export_copies) + final_model_reserve + margin
     if projected > budget_bytes:
         raise OSError(
             "Insufficient bounded output budget for restored/current artifacts, "
-            "one full checkpoint, final model export, and safety margin "
-            f"({existing_bytes}+{checkpoint_reserve}+{final_model_reserve}+{margin} > {budget_bytes} bytes)"
+            f"{checkpoint_copies} full checkpoints, {export_copies} export copies, final model, and safety margin "
+            f"({projected} > {budget_bytes} bytes)"
         )
     free_bytes = shutil.disk_usage(counted_root).free
-    needed_free = checkpoint_reserve + final_model_reserve + margin
+    needed_free = checkpoint_reserve * (checkpoint_copies + export_copies) + final_model_reserve + margin
     if free_bytes < needed_free:
         raise OSError(
-            "Insufficient filesystem free space for one full checkpoint, "
+            "Insufficient filesystem free space for reserved checkpoints and export copies, "
             f"final model export, and safety margin ({free_bytes} < {needed_free} bytes)"
         )
     return {"existing_output_bytes": existing_bytes, "checkpoint_reserve_bytes": checkpoint_reserve,
             "final_model_reserve_bytes": final_model_reserve, "safety_margin_bytes": margin,
-            "projected_output_bytes": projected, "output_budget_bytes": budget_bytes,
+            "checkpoint_reserve_copies": checkpoint_copies, "export_reserve_copies": export_copies, "projected_output_bytes": projected, "output_budget_bytes": budget_bytes,
             "filesystem_free_bytes": free_bytes}
 
 
@@ -106,6 +110,10 @@ def run_training(config: TrainingConfig, *, resume_from_checkpoint: str | None =
     after a full checkpoint has been sealed. The same config and runtime
     identity are required to resume the next segment.
     """
+    if config.async_checkpoint_upload and durability_timeout_seconds is not None:
+        raise ValueError("async_checkpoint_upload cannot use blocking durability_timeout_seconds")
+    if config.async_checkpoint_upload and segment_steps is not None and not continue_through_checkpoints:
+        raise ValueError("async_checkpoint_upload segmented runs require continue_through_checkpoints")
     if type(finalize_only) is not bool:
         raise ValueError("finalize_only must be a boolean")
     if finalize_only and (resume_from_checkpoint is None or segment_steps is not None):
@@ -124,7 +132,7 @@ def run_training(config: TrainingConfig, *, resume_from_checkpoint: str | None =
         raise ValueError("continue_through_checkpoints must be a boolean")
     if continue_through_checkpoints and segment_steps is None:
         raise ValueError("continue_through_checkpoints requires an explicit segmented run")
-    if output_budget_bytes is not None and segment_steps is None and not finalize_only:
+    if output_budget_bytes is not None and segment_steps is None and not finalize_only and not config.async_checkpoint_upload:
         raise ValueError("output_budget_bytes requires an explicit segmented run")
     if output_budget_bytes is not None and (type(output_budget_bytes) is not int or output_budget_bytes <= 0):
         raise ValueError("output_budget_bytes must be a positive integer")
@@ -319,6 +327,8 @@ def run_training(config: TrainingConfig, *, resume_from_checkpoint: str | None =
     run_manifest_hash = sha256_file(output / "run_manifest.json")
 
     trainer_holder: dict[str, Any] = {}
+    async_schedule = (AsyncCheckpointSchedule(output, config.checkpoint_interval_seconds, config.async_checkpoint_max_local)
+                      if config.async_checkpoint_upload else None)
 
     class AuditCheckpoint(TrainerCallback):
         def __init__(self):
@@ -335,11 +345,23 @@ def run_training(config: TrainingConfig, *, resume_from_checkpoint: str | None =
             if segment_steps is not None:
                 self.boundary_step = min(state.max_steps, state.global_step + segment_steps)
             self.timer.mark_saved()
+            if async_schedule is not None:
+                async_schedule.begin()
+                write_json(output / "checkpoint_upload_status.json", async_schedule.status())
             return control
 
         def on_step_end(self, args: Any, state: Any, control: Any, **kwargs: Any) -> Any:
             at_boundary = self.boundary_step is not None and state.global_step >= self.boundary_step
             timer_due = self.timer.due()
+            if async_schedule is not None:
+                # Override Transformers step saves; only wall-clock or final/segment
+                # boundaries request a synchronous, coherent local snapshot.
+                terminal = state.global_step >= state.max_steps or at_boundary
+                previous_coalesced = async_schedule.coalesced_requests
+                control.should_save = async_schedule.should_save(boundary=terminal)
+                if previous_coalesced != async_schedule.coalesced_requests:
+                    write_json(output / "checkpoint_upload_status.json", async_schedule.status())
+                timer_due = False
             # Prove the full-size off-runtime backup before substantial training.
             # Subsequent saves keep the configured step/timer cadence unchanged.
             if durability_timeout_seconds is not None and state.global_step == 1:
@@ -359,6 +381,11 @@ def run_training(config: TrainingConfig, *, resume_from_checkpoint: str | None =
             return control
 
         def on_save(self, args: Any, state: Any, control: Any, **kwargs: Any) -> Any:
+            if trainer_holder.pop("checkpoint_space_skipped", False):
+                if self.evaluate_after_save:
+                    self.evaluate_after_save = False
+                    trainer_holder["trainer"].evaluate()
+                return control
             if state.is_world_process_zero:
                 checkpoint = output / f"checkpoint-{state.global_step}"
                 checkpoint_evidence(checkpoint, run_manifest_hash)
@@ -367,6 +394,9 @@ def run_training(config: TrainingConfig, *, resume_from_checkpoint: str | None =
                     wait_for_durable_ack(output, checkpoint, durability_timeout_seconds)
                 self.last_checkpoint = checkpoint.name
                 self.new_checkpoints.append(checkpoint.name)
+                if async_schedule is not None:
+                    async_schedule.saved(checkpoint.name)
+                    write_json(output / "checkpoint_upload_status.json", async_schedule.status())
                 at_boundary = self.boundary_step is not None and state.global_step >= self.boundary_step
                 pause_first = segment_steps is not None and not continue_through_checkpoints
                 if pause_first or at_boundary:
@@ -417,13 +447,27 @@ def run_training(config: TrainingConfig, *, resume_from_checkpoint: str | None =
     class AuditedTrainer(Trainer):
         def _save_checkpoint(self, *args: Any, **kwargs: Any) -> None:
             nonlocal space
+            terminal = (self.state.global_step >= self.state.max_steps
+                        or self.state.global_step == checkpoint_callback.boundary_step)
+            if async_schedule is not None and terminal and len(async_schedule.local_checkpoints()) >= config.async_checkpoint_max_local + 1:
+                raise OSError("Final/segment checkpoint reserved slot already occupied; verified retention must reclaim space before another segment")
             if output_budget_bytes is not None:
-                # Check at the actual write boundary, even if legacy evaluation
-                # took a long time after on_step_end. Export chunks under the
-                # chosen root count against the same bound on every save.
-                space = _output_budget_reservation(
-                    output, parameters=total_parameters, budget_bytes=output_budget_bytes,
-                    budget_root=Path(output_budget_root) if output_budget_root else None)
+                try:
+                    # Shared budget includes sealed checkpoints and controller
+                    # exports; reserve a future final snapshot and a full export
+                    # copy for every allowed snapshot while training continues.
+                    space = _output_budget_reservation(
+                        output, parameters=total_parameters, budget_bytes=output_budget_bytes,
+                        budget_root=Path(output_budget_root) if output_budget_root else None,
+                        checkpoint_copies=2 if async_schedule is not None and not terminal else 1,
+                        export_copies=config.async_checkpoint_max_local + 1 if async_schedule is not None else 0)
+                except OSError as exc:
+                    if async_schedule is None or terminal:
+                        raise
+                    async_schedule.coalesce_space(exc)
+                    write_json(output / "checkpoint_upload_status.json", async_schedule.status())
+                    trainer_holder["checkpoint_space_skipped"] = True
+                    return
             save = super()._save_checkpoint
             original_output = self.args.output_dir
 
@@ -464,7 +508,11 @@ def run_training(config: TrainingConfig, *, resume_from_checkpoint: str | None =
     space = None
     if output_budget_bytes is not None:
         space = _output_budget_reservation(output, parameters=total_parameters, budget_bytes=output_budget_bytes,
-                                           budget_root=Path(output_budget_root) if output_budget_root else None)
+                                           budget_root=Path(output_budget_root) if output_budget_root else None,
+                                           checkpoint_copies=(max(1, config.async_checkpoint_max_local + 1
+                                                                  - len(async_schedule.local_checkpoints()))
+                                                              if async_schedule is not None else 1),
+                                           export_copies=config.async_checkpoint_max_local + 1 if async_schedule is not None else 0)
     before_checkpoints = {path.name for path in output.glob("checkpoint-[0-9]*") if path.is_dir()}
     write_json(output / "run_status.json", {
         "status": "running", "started_at": now_utc(), "resume_from": resume_from_checkpoint,
@@ -496,7 +544,7 @@ def run_training(config: TrainingConfig, *, resume_from_checkpoint: str | None =
                     raise RuntimeError("Paused segment step differs from its sealed checkpoint")
                 added_checkpoints = {path.name for path in output.glob("checkpoint-[0-9]*") if path.is_dir()} - before_checkpoints
                 expected_checkpoints = set(checkpoint_callback.new_checkpoints)
-                if added_checkpoints != expected_checkpoints:
+                if async_schedule is None and added_checkpoints != expected_checkpoints:
                     raise RuntimeError("Segment checkpoint set differs from newly sealed checkpoints")
                 if continue_through_checkpoints:
                     if global_step != checkpoint_callback.boundary_step:
@@ -564,7 +612,8 @@ def run_training(config: TrainingConfig, *, resume_from_checkpoint: str | None =
                    "segment_limit_optimizer_steps": segment_steps,
                    "continue_through_checkpoints": continue_through_checkpoints,
                    "new_checkpoints": checkpoint_callback.new_checkpoints, "output_space_preflight": space,
-                   "observed_output_bytes": actual_output_bytes})
+                   "observed_output_bytes": actual_output_bytes,
+                   "checkpoint_upload": async_schedule.status() if async_schedule is not None else None})
         return {"output_dir": str(output), "artifact": str(final_dir), "status": "completed",
                 "global_step": trainer.state.global_step, "planned_global_steps": trainer.state.max_steps,
                 "training_mode": config.training_mode,
