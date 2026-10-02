@@ -9,6 +9,7 @@ files alone are cleaned up. Public restore uses no GitHub credentials.
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
 import hashlib
 import json
@@ -33,6 +34,7 @@ SCHEMA = "picoagent.github-checkpoint-plan.v1"
 MAX_ASSETS = 1000
 ASSET_LIMIT = 2 * 1024**3  # GitHub requires strictly less than 2 GiB.
 METADATA_LIMIT = 16 * 1024**2
+PARALLEL_CHUNK_LIMIT = 32 * 1024**2
 REPO = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9_.-]+\Z")
 COMMIT = re.compile(r"[0-9a-f]{40}\Z")
 
@@ -275,10 +277,37 @@ def asset_identity(assets):
             for name, asset in assets.items()}
 
 
+def run_batch(names, operation, workers):
+    """Join every worker before returning/raising, including on interruption.
+
+    Batches contain at most workers items, so no unbounded queued work or disk
+    materialization can accumulate. Running CLI operations retain their timeout.
+    """
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = []
+        try:
+            for name in names:
+                futures.append(executor.submit(operation, name))
+            return [future.result() for future in as_completed(futures)]
+        except BaseException:
+            for future in futures:
+                future.cancel()
+            raise  # Executor drains running operations before unwinding cleanup.
+
+
 def upload_checkpoint(run_dir, manifest_path, plan, *, approved_plan_sha256, publish=False,
-                      client=None, public_opener=None):
-    """Call only after approval of this exact repository/public data scope."""
+                      client=None, public_opener=None, upload_workers=1):
+    """Call only after approval of this exact repository/public data scope.
+
+    Parallel clients must support concurrent upload/stream calls. Inventory and
+    release mutations stay on the caller thread. Default behavior remains serial.
+    """
+    if type(upload_workers) is not int or not 1 <= upload_workers <= 4:
+        raise ValueError("upload_workers must be an integer from 1 to 4")
     validate_plan(plan)
+    if upload_workers > 1 and any(record["bytes"] > PARALLEL_CHUNK_LIMIT
+                                  for record in plan["assets"].values()):
+        raise ValueError("Parallel upload requires assets no larger than 32 MiB")
     if digest_json(plan) != approved_plan_sha256:
         raise ValueError("Exact approved plan SHA256 is required before any GitHub access")
     if make_plan(run_dir, manifest_path, plan["identity"]["repository"]) != plan:
@@ -309,11 +338,11 @@ def upload_checkpoint(run_dir, manifest_path, plan, *, approved_plan_sha256, pub
     ordered = sorted(name for name in locations if name != BUNDLE_MANIFEST) + [BUNDLE_MANIFEST]
     verified = {}
     with tempfile.TemporaryDirectory(prefix="checkpoint-release-") as directory:
-        for name in ordered:
+        def upload_one(name):
             record = plan["assets"][name]
-            if name not in assets:
-                path = Path(directory) / name
-                source, offset = locations[name]
+            path = Path(directory) / name
+            source, offset = locations[name]
+            try:
                 with source.open("rb") as input_file, path.open("xb") as output:
                     input_file.seek(offset)
                     left = record["bytes"]
@@ -326,13 +355,43 @@ def upload_checkpoint(run_dir, manifest_path, plan, *, approved_plan_sha256, pub
                 if sha256(path) != record["sha256"]:
                     raise ValueError("Upload source changed")
                 client.upload(plan["tag"], path)  # Never --clobber.
-                path.unlink()  # Only this invocation's temporary chunk.
-                assets = asset_inventory(client, release, plan)
-                if name not in assets:
-                    raise RuntimeError("Uploaded asset was not confirmed; inspect before retry")
+            finally:
+                path.unlink(missing_ok=True)  # Only this invocation's temporary chunk.
+
+        def verify_one(name):
+            record = plan["assets"][name]
             with client.stream(assets[name]) as stream:
                 readback(stream, record)
-            verified[name] = {"id": assets[name]["id"], **record}
+            return name, {"id": assets[name]["id"], **record}
+
+        if upload_workers > 1:
+            chunks = ordered[:-1]
+            for start in range(0, len(chunks), upload_workers):
+                batch = chunks[start:start + upload_workers]
+                missing = [name for name in batch if name not in assets]
+                previous = asset_identity(assets)
+                run_batch(missing, upload_one, upload_workers)
+                # No sibling upload is still in progress when we inspect state.
+                assets = asset_inventory(client, release, plan)
+                if set(assets) != set(previous) | set(missing):
+                    raise RuntimeError("Uploaded asset inventory was not confirmed; inspect before retry")
+                if asset_identity({name: assets[name] for name in previous}) != previous:
+                    raise ValueError("Release assets changed during upload")
+                verified.update(run_batch(batch, verify_one, upload_workers))
+            ordered = [BUNDLE_MANIFEST]
+        for name in ordered:
+            if name not in assets:
+                previous = asset_identity(assets)
+                upload_one(name)
+                assets = asset_inventory(client, release, plan)
+                if upload_workers > 1 and (
+                        set(assets) != set(previous) | {name}
+                        or asset_identity({key: assets[key] for key in previous if key in assets}) != previous):
+                    raise ValueError("Release assets changed during manifest upload")
+                if name not in assets:
+                    raise RuntimeError("Uploaded asset was not confirmed; inspect before retry")
+            key, record = verify_one(name)
+            verified[key] = record
     latest = client.release(plan["tag"])
     check_release(latest, plan, body)
     if asset_identity(asset_inventory(client, latest, plan)) != asset_identity(assets):
@@ -429,6 +488,8 @@ def main():
         command.add_argument("--plan", type=Path, required=True)
     upload.add_argument("--approved-plan-sha256", required=True)
     upload.add_argument("--publish", action="store_true", help="Only after explicit public publication approval")
+    upload.add_argument("--upload-workers", type=int, choices=range(1, 5), default=1,
+                        help="Bounded upload/read-back workers (default: serial; parallel assets <=32 MiB)")
     upload.add_argument("--receipt", type=Path, required=True)
     restore.add_argument("--destination", type=Path, required=True)
     restore.add_argument("--expected-plan-sha256", required=True)
@@ -442,7 +503,8 @@ def main():
             raise ValueError("Receipt output must be new")
         with _exclusive_lock(args.run_dir):
             result = upload_checkpoint(args.run_dir, args.transfer_manifest, read_json(args.plan),
-                                       approved_plan_sha256=args.approved_plan_sha256, publish=args.publish)
+                                       approved_plan_sha256=args.approved_plan_sha256, publish=args.publish,
+                                       upload_workers=args.upload_workers)
             write_json(args.receipt, result, exclusive=True)
         print(json.dumps({"published": result["published"], "receipt": str(args.receipt)}))
     else:

@@ -313,7 +313,12 @@ finally:
 """)
 
 
-def validate_publication_options(publish_repository, approve_public_checkpoints, prune_local_published_cache=False):
+def validate_publication_options(publish_repository, approve_public_checkpoints,
+                                 prune_local_published_cache=False, upload_workers=1):
+    if type(upload_workers) is not int or not 1 <= upload_workers <= 4:
+        raise ValueError("upload_workers must be an integer from 1 to 4")
+    if upload_workers != 1 and not publish_repository:
+        raise ValueError("--upload-workers requires --publish-repository")
     if prune_local_published_cache and not publish_repository:
         raise ValueError("--prune-local-published-cache requires --publish-repository and --approve-public-checkpoints")
     if publish_repository is not None:
@@ -324,7 +329,7 @@ def validate_publication_options(publish_repository, approve_public_checkpoints,
             raise ValueError("Expected explicit GitHub OWNER/REPO")
 
 
-def publish_collected_checkpoint(client, project, run_dir, destination, bundle, repository):
+def publish_collected_checkpoint(client, project, run_dir, destination, bundle, repository, *, upload_workers=1):
     """Persist exact release evidence before acknowledging the trainer's barrier.
 
     A controller-lifetime cache skips repeated public reads only after a confirmed
@@ -336,6 +341,7 @@ def publish_collected_checkpoint(client, project, run_dir, destination, bundle, 
     from picoagent.training.provenance import write_json
     from picoagent.training.data import canonical_json
 
+    validate_publication_options(repository, True, upload_workers=upload_workers)
     manifest = no_symlink_path(destination / ".incoming" / bundle["name"] / bundle["sha256"]
                                / "transfer_manifest.json")
     if sha256(manifest) != bundle["sha256"]:
@@ -371,7 +377,8 @@ def publish_collected_checkpoint(client, project, run_dir, destination, bundle, 
             if bundle.get("durability_ack_sha256") == ack_digest:
                 return str(receipt_path)
     receipt = upload_checkpoint(destination, manifest, plan,
-                                approved_plan_sha256=digest_json(plan), publish=True)
+                                approved_plan_sha256=digest_json(plan), publish=True,
+                                **({"upload_workers": upload_workers} if upload_workers != 1 else {}))
     if receipt.get("identity") != plan["identity"] or receipt.get("plan_sha256") != digest_json(plan):
         raise ValueError("Release receipt differs from approved checkpoint identity")
     if (receipt.get("tag") != plan["tag"]
@@ -404,8 +411,8 @@ print({json.dumps(OUTPUT_SENTINEL)} + json.dumps({{'durability_acknowledged': {r
 def collect(client: Colab, project: str, run_dir: str, export_root: str,
             destination: Path, off_runtime: bool, prune: bool = False, *,
             publish_repository: str | None = None, approve_public_checkpoints: bool = False,
-            prune_local_published_cache: bool = False) -> dict:
-    validate_publication_options(publish_repository, approve_public_checkpoints, prune_local_published_cache)
+            prune_local_published_cache: bool = False, upload_workers: int = 1) -> dict:
+    validate_publication_options(publish_repository, approve_public_checkpoints, prune_local_published_cache, upload_workers)
     if not off_runtime:
         raise ValueError("--off-runtime is required: a Colab-local copy is not a backup")
     result = client.execute(remote_prelude(project) + f"""
@@ -458,7 +465,8 @@ print({json.dumps(OUTPUT_SENTINEL)} + json.dumps(result))
             raise ValueError("Collected checkpoint identity differs from advertised export")
         if publish_repository is not None:
             release_receipts[final.name] = publish_collected_checkpoint(
-                client, project, run_dir, destination, bundle, publish_repository)
+                client, project, run_dir, destination, bundle, publish_repository,
+                **({"upload_workers": upload_workers} if upload_workers != 1 else {}))
         if prune_local_published_cache:
             from local_checkpoint_cache import prune_published
             pruned_local.extend(prune_published(destination, bundle, publish_repository, client))
@@ -555,11 +563,15 @@ def main() -> None:
         command.add_argument("--publish-repository", help="Publish exact verified checkpoints to public OWNER/REPO")
         command.add_argument("--approve-public-checkpoints", action="store_true",
                              help="Approve public disclosure of checkpoints and their pinned run/source data")
+        command.add_argument("--upload-workers", type=int, choices=range(1, 5), default=1,
+                             help="Bounded GitHub upload/read-back concurrency (default: serial)")
         if name == "watch":
+            command.add_argument("--stop-file", type=Path,
+                                 help="Stop controller after a completed collection if this local file exists")
             command.add_argument("--interval", type=int, default=60)
     args = parser.parse_args()
     if args.action in {"collect", "watch"}:
-        validate_publication_options(args.publish_repository, args.approve_public_checkpoints, args.prune_local_published_cache)
+        validate_publication_options(args.publish_repository, args.approve_public_checkpoints, args.prune_local_published_cache, args.upload_workers)
     client = Colab(args.session, args.colab, args.timeout)
     if args.action == "stage":
         result = stage(client, args.source, args.project, args.archive,
@@ -581,9 +593,14 @@ def main() -> None:
                                  args.destination, args.off_runtime, args.prune,
                                  publish_repository=args.publish_repository,
                                  approve_public_checkpoints=args.approve_public_checkpoints,
-                                 prune_local_published_cache=args.prune_local_published_cache)
+                                 prune_local_published_cache=args.prune_local_published_cache,
+                                 **({"upload_workers": args.upload_workers} if args.upload_workers != 1 else {}))
                 print(json.dumps(result), flush=True)
                 if args.action == "collect":
+                    return
+                if args.stop_file is not None and args.stop_file.exists():
+                    print(json.dumps({"controller_stopped": True, "reason": "stop_file",
+                                      "collection_completed": True, "stop_file": str(args.stop_file)}), flush=True)
                     return
                 current = status(client, args.project, args.run_dir)
                 states = {(current.get(key) or {}).get("status") for key in ("run_status", "job_status")}

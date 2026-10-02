@@ -77,7 +77,8 @@ def _training_exit_code(snapshot):
 
 def watch(client, *, project, run_dir, export_root, destination, prune=False,
           interval=120, collect_fn=None, status_fn=None, sleep_fn=None, emit=None,
-          publish_repository=None, approve_public_checkpoints=False, prune_local_published_cache=False):
+          publish_repository=None, approve_public_checkpoints=False, prune_local_published_cache=False,
+          upload_workers=1, stop_file=None):
     """Collect until terminal status, then collect once more before returning.
 
     A checkpoint can be sealed after an earlier collection but before the
@@ -85,24 +86,37 @@ def watch(client, *, project, run_dir, export_root, destination, prune=False,
     that race; the following status read ensures the terminal outcome is still
     current before deciding whether training succeeded.
     """
-    validate_publication_options(publish_repository, approve_public_checkpoints, prune_local_published_cache)
+    validate_publication_options(publish_repository, approve_public_checkpoints, prune_local_published_cache, upload_workers)
     publication = ({"publish_repository": publish_repository,
                     "approve_public_checkpoints": approve_public_checkpoints}
                    if publish_repository is not None else {})
+    if upload_workers != 1:
+        publication["upload_workers"] = upload_workers
     if prune_local_published_cache:
         publication["prune_local_published_cache"] = True
     collect_fn = collect if collect_fn is None else collect_fn
     status_fn = status if status_fn is None else status_fn
     sleep_fn = time.sleep if sleep_fn is None else sleep_fn
     emit = (lambda payload: print(payload, flush=True)) if emit is None else emit
+    def stop_requested():
+        if stop_file is not None and Path(stop_file).exists():
+            emit(json.dumps({"controller_stopped": True, "reason": "stop_file",
+                             "collection_completed": True, "stop_file": str(stop_file)}))
+            return True
+        return False
+
     while True:
         result = collect_fn(client, project, run_dir, export_root, destination, True, prune, **publication)
         emit(json.dumps(result))
+        if stop_requested():
+            return 0
         current = status_fn(client, project, run_dir)
         emit(json.dumps(current))
         if _terminal_status(current):
             final_result = collect_fn(client, project, run_dir, export_root, destination, True, prune, **publication)
             emit(json.dumps(final_result))
+            if stop_requested():
+                return 0
             final_status = status_fn(client, project, run_dir)
             emit(json.dumps(final_status))
             if _terminal_status(final_status):
@@ -128,8 +142,12 @@ def main():
     parser.add_argument('--download-workers', type=int, default=1,
                         choices=range(1, MAX_DOWNLOAD_WORKERS + 1),
                         help='Bounded concurrent checkpoint chunk downloads (default: serial)')
+    parser.add_argument('--upload-workers', type=int, choices=range(1, 5), default=1,
+                        help='Bounded GitHub upload/read-back concurrency (default: serial)')
+    parser.add_argument('--stop-file', type=Path,
+                        help='Stop controller after a completed collection if this local file exists')
     args = parser.parse_args()
-    validate_publication_options(args.publish_repository, args.approve_public_checkpoints, args.prune_local_published_cache)
+    validate_publication_options(args.publish_repository, args.approve_public_checkpoints, args.prune_local_published_cache, args.upload_workers)
     from picoagent.training.retention import _exclusive_lock
     args.destination.mkdir(parents=True, exist_ok=True)
     client = SDKController(args.session, download_workers=args.download_workers)
@@ -139,7 +157,9 @@ def main():
                           prune=args.prune, interval=args.interval,
                           publish_repository=args.publish_repository,
                           approve_public_checkpoints=args.approve_public_checkpoints,
-                          prune_local_published_cache=args.prune_local_published_cache)
+                          prune_local_published_cache=args.prune_local_published_cache,
+                          **({"upload_workers": args.upload_workers} if args.upload_workers != 1 else {}),
+                          **({"stop_file": args.stop_file} if args.stop_file is not None else {}))
     if exit_code:
         raise SystemExit(exit_code)
 
