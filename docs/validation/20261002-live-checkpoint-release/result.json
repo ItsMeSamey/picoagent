@@ -1,0 +1,25 @@
+{
+  "schema": "picoagent.validation.live-checkpoint-release.v1",
+  "date_utc": "2026-10-02",
+  "code_commit": "550748cbdcb1d4994dd4fa11bc4ba84a9a766b53",
+  "fixture": "Synthetic CPU Linear(4,2), two AdamW optimizer steps; not a language model or production checkpoint",
+  "release_url": "https://github.com/ItsMeSamey/picoagent/releases/tag/checkpoint-sfbd035f7ff5c5272d16359ccb97de0de2c810b3e7d634890ee5fe5f05c16e8b8-rcd4f8f9e25472edbe1a23874edddf310530e8bc3f5c63f68039eaa8823b52433-checkpoint-2-mfae59981fd669632",
+  "release_id": 401579439,
+  "asset_count": 9,
+  "total_asset_bytes": 19138,
+  "plan_sha256": "5733f5201b6ac14b1b83d3ef94afae751f7f4531af2b0f9310baee3125b9078f",
+  "published": true,
+  "independent_all_asset_readback_verified": true,
+  "anonymous_pinned_restore_verified": true,
+  "fresh_process_next_optimizer_update_bitwise_equal": true,
+  "model_optimizer_scheduler_rng_restored": true,
+  "accelerator_used": false,
+  "release_deleted": false,
+  "limitations": [
+    "19KB synthetic storage fixture, not production-size throughput or failure-domain validation",
+    "No production checkpoint or previously missing backup bytes recovered",
+    "No GPU/TPU job or full training performed"
+  ],
+  "reproduce_restore_command": "python scripts/github_checkpoint_release.py restore --plan docs/validation/20261002-live-checkpoint-release/plan.json --expected-plan-sha256 5733f5201b6ac14b1b83d3ef94afae751f7f4531af2b0f9310baee3125b9078f --destination /absolute/path/to/new-restored-fixture",
+  "source_note": "original-synthetic-fixture.py preserves exact published fixture source and original workspace assumptions; source_snapshot in restored release is authoritative"
+}
